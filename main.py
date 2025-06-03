@@ -1,8 +1,9 @@
-sistema tutto """
-Sistema Multi-Agente per la Revisione di Paper Scientifici
-Versione alternativa senza dipendenza dal framework 'agents'
+"""
+Sistema Multi-Agente per la Revisione di Paper Scientifici.
+Versione alternativa senza dipendenza dal framework 'agents'.
 
-Questo sistema usa OpenAI API direttamente invece del framework agents
+Questo sistema usa le OpenAI API direttamente invece del framework
+`agents`.
 """
 
 import os
@@ -112,35 +113,35 @@ class Agent:
     
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=60))
     def run(self, message: str) -> str:
-    """Esegue l'agente con il messaggio dato."""
-    if not self.client:
-        raise ValueError("OpenAI client not initialized")
-    
-    # Verifica che il messaggio non sia vuoto
-    if not message or not message.strip():
-        raise ValueError("Message content cannot be empty")
-    
-    try:
-        # Alcuni modelli (o1-preview, o1-mini) supportano solo temperature=1
-        temperature = self.temperature if self.model not in ["o1-preview", "o1-mini"] else 1
+        """Esegue l'agente con il messaggio dato."""
+        if not self.client:
+            raise ValueError("OpenAI client not initialized")
         
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": self.instructions},
-                {"role": "user", "content": message}
-            ],
-            temperature=temperature,
-            max_tokens=4000
-        )
+        # Verifica che il messaggio non sia vuoto
+        if not message or not message.strip():
+            raise ValueError("Message content cannot be empty")
         
-        result = response.choices[0].message.content
-        logger.info(f"Agent {self.name} completed successfully")
-        return result
+        try:
+            # Alcuni modelli (o1-preview, o1-mini) supportano solo temperature=1
+            temperature = self.temperature if self.model not in ["o1-preview", "o1-mini"] else 1
+            
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self.instructions},
+                    {"role": "user", "content": message}
+                ],
+                temperature=temperature,
+                max_completion_tokens=4000
+            )
+            
+            result = response.choices[0].message.content
+            logger.info(f"Agent {self.name} completed successfully")
+            return result
         
-    except Exception as e:
-        logger.error(f"Error in agent {self.name}: {e}")
-        raise
+        except Exception as e:
+            logger.error(f"Error in agent {self.name}: {e}")
+            raise
 
 @dataclass
 class PaperInfo:
@@ -602,27 +603,21 @@ class ReviewOrchestrator:
     
     def _prepare_initial_message(self, paper_info: PaperInfo, paper_text: str) -> str:
         """Prepara il messaggio iniziale per gli agenti."""
-        # Troncamento del paper_text per evitare di superare i limiti di contesto,
-        # specialmente per i modelli con finestre di contesto più piccole.
-        # Il modello più piccolo (gpt-4 standard) ha circa 8k token.
-        # Riserviamo circa 2k token per istruzioni e metadati, lasciando circa 6k token per il paper.
-        # 6k token * ~4 char/token = ~24000 caratteri. Usiamo 25000 come limite.
-        MAX_PAPER_TEXT_CHARS = 25000
-        
+
+        # Manteniamo sempre il testo completo del paper. Se supera la soglia
+        # consigliata per alcuni modelli, emettiamo solo un avviso di log.
         display_paper_text = paper_text
         original_length = len(paper_text)
 
-        if original_length > MAX_PAPER_TEXT_CHARS:
-            display_paper_text = (
-                paper_text[:MAX_PAPER_TEXT_CHARS] +
-                "\\n\\n[PAPER TRUNCATED DUE TO LENGTH LIMITS. FULL ANALYSIS MAY BE IMPACTED.]"
-            )
-            logger.warning(
-                f"Paper text was truncated from {original_length} to {MAX_PAPER_TEXT_CHARS} characters "
-                f"for agent prompts. This may impact review quality."
+        MAX_RECOMMENDED_CHARS = 25000
+        if original_length > MAX_RECOMMENDED_CHARS:
+            logger.info(
+                f"Paper text is {original_length} characters; this may exceed some model limits "
+                f"(recommended <= {MAX_RECOMMENDED_CHARS}). Using full text as requested."
             )
 
-        prompt_template = """Paper to be analyzed:
+        prompt_template = (
+            """Paper to be analyzed:
 
 Title: {title}
 Authors: {authors}
@@ -632,17 +627,18 @@ Please conduct a comprehensive and thorough review of this scientific paper.
 All reviewers should provide their comments IN ENGLISH.
 Each reviewer should analyze the paper from their own expert perspective.
 
-The (potentially truncated) paper content is as follows:
+The paper content is as follows:
 
 {text_content}
-\'\'\'
-        
+"""
+        )
+
         return prompt_template.format(
             title=paper_info.title,
             authors=paper_info.authors,
             abstract=paper_info.abstract,
             text_content=display_paper_text
-        ) """
+        )
     
     def _execute_main_reviewers(self, initial_message: str) -> Dict[str, str]:
         """Esegue i revisori principali in parallelo."""
@@ -924,9 +920,3 @@ if __name__ == "__main__":
     import sys
     sys.exit(main())
 
-2025-06-03 23:15:07,154 - paper_review_system - WARNING - Paper text was truncated from 380155 to 25000 characters for agent prompts. This may impact review quality.
-2025-06-03 23:15:07,823 - paper_review_system - ERROR - Error in agent Methodology_Expert: Error code: 400 - {'error': {'message': "Invalid value for 'content': expected a string, got null.", 'type': 'invalid_request_error', 'param': 'messages.[1].content', 'code': None}}
-2025-06-03 23:15:07,823 - paper_review_system - ERROR - Error in agent Methodology_Expert: Error code: 400 - {'error': {'message': "Invalid value for 'content': expected a string, got null.", 'type': 'invalid_request_error', 'param': 'messages.[1].content', 'code': None}}
-2025-06-03 23:15:07,825 - paper_review_system - ERROR - Error in agent Results_Analyst: Error code: 400 - {'error': {'message': "Invalid value for 'content': expected a string, got null.", 'type': 'invalid_request_error', 'param': 'messages.[1].content', 'code': None}}
-2025-06-03 23:15:07,825 - paper_review_system - ERROR - Error in agent Results_Analyst: Error code: 400 - {'error': {'message': "Invalid value for 'content': expected a string, got null.", 'type': 'invalid_request_error', 'param': 'messages.[1].content', 'code': None}}
-2025-06-03 23:15:07,857 - paper_review_system - ERROR - Error in agent Literature_Expert: Error code: 400 - {'error': {'message': "Invalid value for 'content': expected a string, got null.", 'type': 'invalid_request_error', 'param': 'messages.[1].content', 'code': None}}
