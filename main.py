@@ -132,7 +132,8 @@ class Agent:
                     {"role": "user", "content": message}
                 ],
                 temperature=temperature,
-                max_tokens=4000
+
+                max_completion_tokens=4000
             )
             
             result = response.choices[0].message.content
