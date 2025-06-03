@@ -54,9 +54,9 @@ logger = setup_logging()
 class Config:
     """Configurazione centralizzata del sistema."""
     api_key: str = field(default_factory=lambda: os.environ.get("OPENAI_API_KEY", ""))
-    model_powerful: str = "o3"
-    model_standard: str = "gpt-4.1"
-    model_basic: str = "gpt-4.1 mini"
+    model_powerful: str = "gpt-4o"
+    model_standard: str = "gpt-4-turbo"
+    model_basic: str = "gpt-3.5-turbo"
     output_dir: str = "output_revisione_paper"
     max_parallel_agents: int = 3
     agent_timeout: int = 300  # secondi
