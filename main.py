@@ -16,11 +16,13 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from io import StringIO
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from abc import ABC, abstractmethod
 import yaml
 from openai import OpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
+import pdfplumber
 
 # Configurazione logging
 def setup_logging(log_level: str = "INFO") -> logging.Logger:
@@ -196,6 +198,23 @@ class FileManager:
         except Exception as e:
             logger.error(f"Error saving text file {filepath}: {e}")
             return False
+
+    def extract_text_from_pdf(self, pdf_path: str) -> str:
+        """Restituisce il testo concatenato di tutte le pagine di un PDF."""
+        if not Path(pdf_path).exists():
+            logger.error(f"PDF not found: {pdf_path}")
+            return ""
+        text_buf = StringIO()
+        try:
+            with pdfplumber.open(pdf_path) as pdf:
+                for page in pdf.pages:
+                    page_text = page.extract_text(x_tolerance=1.5, y_tolerance=1.5)
+                    text_buf.write(page_text or "")
+                    text_buf.write("\n\n")
+            return text_buf.getvalue()
+        except Exception as e:
+            logger.error(f"PDF extraction failed: {e}")
+            return ""
     
     def save_review(self, reviewer_name: str, review_content: str) -> str:
         """Salva la revisione di un revisore."""
@@ -914,9 +933,12 @@ def main():
         # Valida configurazione
         config.validate()
         
-        # Leggi paper
+        # Leggi paper (PDF o testo)
         file_manager = FileManager(config.output_dir)
-        paper_text = file_manager.read_paper(args.paper_path)
+        if args.paper_path.lower().endswith(".pdf"):
+            paper_text = file_manager.extract_text_from_pdf(args.paper_path)
+        else:
+            paper_text = file_manager.read_paper(args.paper_path)
         
         if not paper_text:
             logger.error("Failed to read paper file")
