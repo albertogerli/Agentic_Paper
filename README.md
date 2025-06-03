@@ -4,6 +4,8 @@
 A self-contained **multi-agent pipeline** that performs an end-to-end peer-review of scientific manuscripts by orchestrating several specialised reviewers—each powered directly by the OpenAI Chat Completions API.  
 No external “agents” framework is required.
 
+APRS accepts both plain text and PDF manuscripts. When a `.pdf` is provided, the text is automatically extracted using **pdfplumber**.
+
 ---
 
 ## Key Features
@@ -59,7 +61,7 @@ output_dir: output_reviews
 ### 3 · Run the review
 
 ```bash
-python main.py path/to/paper.txt \
+python main.py path/to/paper.pdf \
   --config config.yaml        \  # optional
   --output-dir my_results     \  # optional
   --log-level DEBUG              # optional
@@ -90,7 +92,7 @@ output_reviews/
 
 | Flag           | Default                  | Description                                              |
 | -------------- | ------------------------ | -------------------------------------------------------- |
-| `paper_path`   | –                        | Path to plain-text paper (PDFs must be converted first). |
+| `paper_path`   | –                        | Path to the paper file (`.txt` or `.pdf`). |
 | `--config`     | `config.yaml`            | YAML overrides for any `Config` field.                   |
 | `--output-dir` | `output_revisione_paper` | Where results are written.                               |
 | `--log-level`  | `INFO`                   | `DEBUG`, `INFO`, `WARNING`, `ERROR`.                     |
@@ -100,7 +102,7 @@ output_reviews/
 ## Dependencies
 
 * Python 3.10+
-* `openai`, `tenacity`, `pyyaml`
+* `openai`, `tenacity`, `pyyaml`, `pdfplumber`
 
 All pinned in **`requirements.txt`**.
 
