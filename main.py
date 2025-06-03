@@ -603,24 +603,17 @@ class ReviewOrchestrator:
     
     def _prepare_initial_message(self, paper_info: PaperInfo, paper_text: str) -> str:
         """Prepara il messaggio iniziale per gli agenti."""
-        # Troncamento del paper_text per evitare di superare i limiti di contesto,
-        # specialmente per i modelli con finestre di contesto più piccole.
-        # Il modello più piccolo (gpt-4 standard) ha circa 8k token.
-        # Riserviamo circa 2k token per istruzioni e metadati, lasciando circa 6k token per il paper.
-        # 6k token * ~4 char/token = ~24000 caratteri. Usiamo 25000 come limite.
-        MAX_PAPER_TEXT_CHARS = 25000
-        
+
+        # Manteniamo sempre il testo completo del paper. Se supera la soglia
+        # consigliata per alcuni modelli, emettiamo solo un avviso di log.
         display_paper_text = paper_text
         original_length = len(paper_text)
 
-        if original_length > MAX_PAPER_TEXT_CHARS:
-            display_paper_text = (
-                paper_text[:MAX_PAPER_TEXT_CHARS] +
-                "\\n\\n[PAPER TRUNCATED DUE TO LENGTH LIMITS. FULL ANALYSIS MAY BE IMPACTED.]"
-            )
-            logger.warning(
-                f"Paper text was truncated from {original_length} to {MAX_PAPER_TEXT_CHARS} characters "
-                f"for agent prompts. This may impact review quality."
+        MAX_RECOMMENDED_CHARS = 25000
+        if original_length > MAX_RECOMMENDED_CHARS:
+            logger.info(
+                f"Paper text is {original_length} characters; this may exceed some model limits "
+                f"(recommended <= {MAX_RECOMMENDED_CHARS}). Using full text as requested."
             )
 
         prompt_template = """Paper to be analyzed:
@@ -633,7 +626,7 @@ Please conduct a comprehensive and thorough review of this scientific paper.
 All reviewers should provide their comments IN ENGLISH.
 Each reviewer should analyze the paper from their own expert perspective.
 
-The (potentially truncated) paper content is as follows:
+The paper content is as follows:
 
 {text_content}
 \'\'\'
