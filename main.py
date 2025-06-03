@@ -617,7 +617,8 @@ class ReviewOrchestrator:
                 f"(recommended <= {MAX_RECOMMENDED_CHARS}). Using full text as requested."
             )
 
-        prompt_template = """Paper to be analyzed:
+        prompt_template = (
+            """Paper to be analyzed:
 
 Title: {title}
 Authors: {authors}
@@ -630,14 +631,15 @@ Each reviewer should analyze the paper from their own expert perspective.
 The paper content is as follows:
 
 {text_content}
-\'\'\'
-        
+"""
+        )
+
         return prompt_template.format(
             title=paper_info.title,
             authors=paper_info.authors,
             abstract=paper_info.abstract,
             text_content=display_paper_text
-        ) """
+        )
     
     def _execute_main_reviewers(self, initial_message: str) -> Dict[str, str]:
         """Esegue i revisori principali in parallelo."""
