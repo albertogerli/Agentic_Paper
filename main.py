@@ -591,10 +591,12 @@ class ReviewOrchestrator:
             editor_decision = self._execute_editor(reviews)
             
             # Sintetizza risultati
-            final_results = self._synthesize_results(paper_info, reviews, editor_decision)
-            
-            # Genera report
-            self._generate_reports(final_results)
+        prompt_template = (
+            """Paper to be analyzed:
+"""
+        )
+
+        )
             
             return final_results
             
