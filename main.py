@@ -1,8 +1,9 @@
-sistema tutto """
-Sistema Multi-Agente per la Revisione di Paper Scientifici
-Versione alternativa senza dipendenza dal framework 'agents'
+"""
+Sistema Multi-Agente per la Revisione di Paper Scientifici.
+Versione alternativa senza dipendenza dal framework 'agents'.
 
-Questo sistema usa OpenAI API direttamente invece del framework agents
+Questo sistema usa le OpenAI API direttamente invece del framework
+`agents`.
 """
 
 import os
@@ -112,35 +113,35 @@ class Agent:
     
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=60))
     def run(self, message: str) -> str:
-    """Esegue l'agente con il messaggio dato."""
-    if not self.client:
-        raise ValueError("OpenAI client not initialized")
-    
-    # Verifica che il messaggio non sia vuoto
-    if not message or not message.strip():
-        raise ValueError("Message content cannot be empty")
-    
-    try:
-        # Alcuni modelli (o1-preview, o1-mini) supportano solo temperature=1
-        temperature = self.temperature if self.model not in ["o1-preview", "o1-mini"] else 1
+        """Esegue l'agente con il messaggio dato."""
+        if not self.client:
+            raise ValueError("OpenAI client not initialized")
         
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": self.instructions},
-                {"role": "user", "content": message}
-            ],
-            temperature=temperature,
-            max_tokens=4000
-        )
+        # Verifica che il messaggio non sia vuoto
+        if not message or not message.strip():
+            raise ValueError("Message content cannot be empty")
         
-        result = response.choices[0].message.content
-        logger.info(f"Agent {self.name} completed successfully")
-        return result
+        try:
+            # Alcuni modelli (o1-preview, o1-mini) supportano solo temperature=1
+            temperature = self.temperature if self.model not in ["o1-preview", "o1-mini"] else 1
+            
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self.instructions},
+                    {"role": "user", "content": message}
+                ],
+                temperature=temperature,
+                max_tokens=4000
+            )
+            
+            result = response.choices[0].message.content
+            logger.info(f"Agent {self.name} completed successfully")
+            return result
         
-    except Exception as e:
-        logger.error(f"Error in agent {self.name}: {e}")
-        raise
+        except Exception as e:
+            logger.error(f"Error in agent {self.name}: {e}")
+            raise
 
 @dataclass
 class PaperInfo:
@@ -924,9 +925,3 @@ if __name__ == "__main__":
     import sys
     sys.exit(main())
 
-2025-06-03 23:15:07,154 - paper_review_system - WARNING - Paper text was truncated from 380155 to 25000 characters for agent prompts. This may impact review quality.
-2025-06-03 23:15:07,823 - paper_review_system - ERROR - Error in agent Methodology_Expert: Error code: 400 - {'error': {'message': "Invalid value for 'content': expected a string, got null.", 'type': 'invalid_request_error', 'param': 'messages.[1].content', 'code': None}}
-2025-06-03 23:15:07,823 - paper_review_system - ERROR - Error in agent Methodology_Expert: Error code: 400 - {'error': {'message': "Invalid value for 'content': expected a string, got null.", 'type': 'invalid_request_error', 'param': 'messages.[1].content', 'code': None}}
-2025-06-03 23:15:07,825 - paper_review_system - ERROR - Error in agent Results_Analyst: Error code: 400 - {'error': {'message': "Invalid value for 'content': expected a string, got null.", 'type': 'invalid_request_error', 'param': 'messages.[1].content', 'code': None}}
-2025-06-03 23:15:07,825 - paper_review_system - ERROR - Error in agent Results_Analyst: Error code: 400 - {'error': {'message': "Invalid value for 'content': expected a string, got null.", 'type': 'invalid_request_error', 'param': 'messages.[1].content', 'code': None}}
-2025-06-03 23:15:07,857 - paper_review_system - ERROR - Error in agent Literature_Expert: Error code: 400 - {'error': {'message': "Invalid value for 'content': expected a string, got null.", 'type': 'invalid_request_error', 'param': 'messages.[1].content', 'code': None}}
