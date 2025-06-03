@@ -132,6 +132,7 @@ class Agent:
                     {"role": "user", "content": message}
                 ],
                 temperature=temperature,
+
                 max_completion_tokens=4000
             )
             
