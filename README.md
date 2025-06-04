@@ -107,7 +107,9 @@ output_reviews/
 ## Dependencies
 
 * Python 3.10+
+
 * `openai`, `tenacity`, `pyyaml`, `pdfplumber`, `aiohttp`
+
 
 All pinned in **`requirements.txt`**.
 

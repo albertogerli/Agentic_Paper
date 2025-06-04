@@ -24,6 +24,7 @@ from openai import OpenAI, AsyncOpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
 from functools import lru_cache
 import aiohttp
+
 import pdfplumber
 
 # Configurazione logging
