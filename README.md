@@ -1,39 +1,38 @@
 ````markdown
 # Agentic Paper Review System (APRS)
 
-A self-contained **multi-agent pipeline** that performs an end-to-end peer-review of scientific manuscripts by orchestrating several specialised reviewers—each powered directly by the OpenAI Chat Completions API.  
+A **self-contained, multi-agent pipeline** that performs an end-to-end peer-review of scientific manuscripts by orchestrating several specialised reviewers—each powered *directly* by the OpenAI Chat Completions API.  
 No external “agents” framework is required.
 
-APRS accepts both plain text and PDF manuscripts. When a `.pdf` is provided, the text is automatically extracted using **pdfplumber**.
+APRS accepts both plain-text **`.txt`** and **`.pdf`** manuscripts. When a PDF is provided, the text is automatically extracted with **pdfplumber**.
 
 ---
 
 ## Key Features
 
-| Agent | Focus | Model (default) |
-|-------|-------|-----------------|
-| **Methodology Expert** | Experimental design, statistical rigour | `o3` |
-| **Results Analyst** | Data analysis, figures & tables | `o3` |
-| **Literature Expert** | Related work & citations | `gpt-4.1` |
-| **Structure & Clarity Reviewer** | Logical flow, readability | `gpt-4.1-mini` |
-| **Impact & Innovation Analyst** | Novelty, real-world impact | `gpt-4.1` |
-| **Contradiction Checker** | Inconsistencies & unsupported claims | `o3` |
-| **Ethics & Integrity Reviewer** | Research ethics, transparency | `gpt-4.1` |
-| **AI Origin Detector** | Likelihood text was AI-generated | `gpt-4.1` |
-| **Hallucination Detector** | Unsupported statements | `gpt-4o-2024-05-13` |
-| **Review Coordinator** | Synthesises all reviews | `o3` |
-| **Journal Editor** | Final editorial decision | `gpt-4.1` |
+| Agent | Focus | Default model |
+|-------|-------|---------------|
+| **Methodology Expert**        | Experimental design, statistical rigour          | `o3` |
+| **Results Analyst**           | Data analysis, figures & tables                  | `o3` |
+| **Literature Expert**         | Related work & citations                         | `gpt-4.1` |
+| **Structure & Clarity Reviewer** | Logical flow, readability                     | `gpt-4.1-mini` |
+| **Impact & Innovation Analyst** | Novelty, real-world impact                    | `gpt-4.1` |
+| **Contradiction Checker**     | Inconsistencies & unsupported claims             | `o3` |
+| **Ethics & Integrity Reviewer** | Research ethics, transparency                 | `gpt-4.1` |
+| **AI Origin Detector**        | Likelihood text was AI-generated                 | `gpt-4.1`* |
+| **Hallucination Detector**    | Unsupported statements                           | `gpt-4.1` |
+| **Review Coordinator**        | Synthesises all reviews                          | `o3` |
+| **Journal Editor**            | Final editorial decision                         | `gpt-4.1` |
 
-Behind the scenes agents run concurrently using Python `asyncio`; results are cached to speed up repeated runs.
+\* You can switch the AI Origin Detector to `o3` (or any other available model) via **`config.yaml`**.
 
-Output includes:
-
-* Individual reviews (`review_<agent>.txt`)
-* Coordinator synthesis
-* Final editorial decision
-* Rich **Markdown report**, **executive summary**, and full **JSON** dump
-  (all saved inside the chosen `output_dir`).
-* Styled HTML dashboard (built with Tailwind CSS) and health report
+* Agents run **concurrently** with `asyncio`; results are **cached** so repeated runs are fast.  
+* Generates:
+  * Individual reviews (`review_<agent>.txt`)
+  * Coordinator synthesis
+  * Editor’s decision
+  * A rich **Markdown report**, **executive summary**, and full **JSON** dump
+  * A modern **Tailwind-CSS HTML dashboard** and a system-health report
 
 ---
 
@@ -42,24 +41,29 @@ Output includes:
 ```bash
 git clone https://github.com/<your-org>/agentic_paper.git
 cd agentic_paper
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+python -m venv .venv && source .venv/bin/activate   # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ````
 
 ### 1 · Add your OpenAI key
 
 ```bash
-export OPENAI_API_KEY="sk-..."
+export OPENAI_API_KEY="sk-…"
 ```
 
-### 2 · (Optional) tweak **`config.yaml`**
+### 2 · (Optional) edit **`config.yaml`**
 
 ```yaml
-# examples only – every field is optional
+# every field is optional – these just override defaults
 model_powerful: o3
-max_parallel_agents: 4
+max_parallel_agents: 3          # 1–3 is usually enough
+agent_timeout: 300              # seconds per reviewer
+output_dir: output_revisione_paper
+
+# Fine-tune individual reviewers
 temperature_methodology: 0.7
-output_dir: output_reviews
+temperature_ai_origin: 0.7      # NEW – tweak AI-origin detector behaviour
+# model_ai_origin: o3           # uncomment to upgrade that reviewer
 ```
 
 ### 3 · Run the review
@@ -71,14 +75,14 @@ python main.py path/to/paper.pdf \
   --log-level DEBUG              # optional
 ```
 
-Logs are streamed to console *and* `paper_review_system.log`.
+Logs stream to console *and* `paper_review_system.log`.
 
 ---
 
 ## Output Structure (default)
 
 ```
-output_reviews/
+output_revisione_paper/
 ├── paper_info.json
 ├── review_Methodology_Expert.txt
 ├── review_Results_Analyst.txt
@@ -95,32 +99,31 @@ output_reviews/
 
 ## Command-line Options
 
-| Flag           | Default                  | Description                                              |
-| -------------- | ------------------------ | -------------------------------------------------------- |
-| `paper_path`   | –                        | Path to the paper file (`.txt` or `.pdf`). |
-| `--config`     | `config.yaml`            | YAML overrides for any `Config` field.                   |
-| `--output-dir` | `output_revisione_paper` | Where results are written.                               |
-| `--log-level`  | `INFO`                   | `DEBUG`, `INFO`, `WARNING`, `ERROR`.                     |
+| Flag           | Default                  | Description                            |
+| -------------- | ------------------------ | -------------------------------------- |
+| `paper_path`   | –                        | Path to the `.txt` or `.pdf` file.     |
+| `--config`     | `config.yaml`            | YAML overrides for any `Config` field. |
+| `--output-dir` | `output_revisione_paper` | Destination directory for results.     |
+| `--log-level`  | `INFO`                   | `DEBUG`, `INFO`, `WARNING`, `ERROR`.   |
 
 ---
 
 ## Dependencies
 
-* Python 3.10+
+* Python ≥ 3.10
 * `openai`, `tenacity`, `pyyaml`, `pdfplumber`, `aiohttp`
-
-All pinned in **`requirements.txt`**.
+  (all versions pinned in **`requirements.txt`**)
 
 ---
 
 ## Limitations & Future Work
 
-* Relies on accurate plaintext extraction; complex PDFs may require manual cleanup.
-* Very large papers (> 25 000 chars) may hit context limits—split or summarise if needed.
-* “AI Origin Detector” is heuristic, not definitive.
-* Batch processing is supported but not fully optimized for very large numbers of agents.
+* Accurate plaintext extraction is vital; highly formatted PDFs may need manual cleanup.
+* Very large papers (> 25 000 chars) can exceed model context—split or summarise if necessary.
+* “AI Origin Detector” uses heuristics, not definitive proof.
+* Batch mode works, but isn’t yet optimised for hundreds of simultaneous papers.
 
-Contributions via pull request are welcome.
+Pull requests are welcome!
 
 ---
 
