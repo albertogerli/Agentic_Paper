@@ -4,6 +4,8 @@
 A self-contained **multi-agent pipeline** that performs an end-to-end peer-review of scientific manuscripts by orchestrating several specialised reviewers—each powered directly by the OpenAI Chat Completions API.  
 No external “agents” framework is required.
 
+APRS accepts both plain text and PDF manuscripts. When a `.pdf` is provided, the text is automatically extracted using **pdfplumber**.
+
 ---
 
 ## Key Features
@@ -18,16 +20,20 @@ No external “agents” framework is required.
 | **Contradiction Checker** | Inconsistencies & unsupported claims | `o3` |
 | **Ethics & Integrity Reviewer** | Research ethics, transparency | `gpt-4.1` |
 | **AI Origin Detector** | Likelihood text was AI-generated | `gpt-4.1` |
+| **Hallucination Detector** | Unsupported statements | `gpt-4o-2024-05-13` |
 | **Review Coordinator** | Synthesises all reviews | `o3` |
 | **Journal Editor** | Final editorial decision | `gpt-4.1` |
+
+Behind the scenes agents run concurrently using Python `asyncio`; results are cached to speed up repeated runs.
 
 Output includes:
 
 * Individual reviews (`review_<agent>.txt`)
 * Coordinator synthesis
 * Final editorial decision
-* Rich **Markdown report**, **executive summary**, and full **JSON** dump  
+* Rich **Markdown report**, **executive summary**, and full **JSON** dump
   (all saved inside the chosen `output_dir`).
+* Lightweight HTML dashboard and health report
 
 ---
 
@@ -59,7 +65,7 @@ output_dir: output_reviews
 ### 3 · Run the review
 
 ```bash
-python main.py path/to/paper.txt \
+python main.py path/to/paper.pdf \
   --config config.yaml        \  # optional
   --output-dir my_results     \  # optional
   --log-level DEBUG              # optional
@@ -81,6 +87,7 @@ output_reviews/
 ├── review_editor.txt
 ├── review_report_YYYYMMDD_HHMMSS.md
 ├── executive_summary_YYYYMMDD_HHMMSS.md
+├── dashboard_YYYYMMDD_HHMMSS.html
 └── review_results_YYYYMMDD_HHMMSS.json
 ```
 
@@ -90,7 +97,7 @@ output_reviews/
 
 | Flag           | Default                  | Description                                              |
 | -------------- | ------------------------ | -------------------------------------------------------- |
-| `paper_path`   | –                        | Path to plain-text paper (PDFs must be converted first). |
+| `paper_path`   | –                        | Path to the paper file (`.txt` or `.pdf`). |
 | `--config`     | `config.yaml`            | YAML overrides for any `Config` field.                   |
 | `--output-dir` | `output_revisione_paper` | Where results are written.                               |
 | `--log-level`  | `INFO`                   | `DEBUG`, `INFO`, `WARNING`, `ERROR`.                     |
@@ -100,7 +107,7 @@ output_reviews/
 ## Dependencies
 
 * Python 3.10+
-* `openai`, `tenacity`, `pyyaml`
+* `openai`, `tenacity`, `pyyaml`, `pdfplumber`, `aiohttp`
 
 All pinned in **`requirements.txt`**.
 
@@ -111,7 +118,7 @@ All pinned in **`requirements.txt`**.
 * Relies on accurate plaintext extraction; complex PDFs may require manual cleanup.
 * Very large papers (> 25 000 chars) may hit context limits—split or summarise if needed.
 * “AI Origin Detector” is heuristic, not definitive.
-* Parallelism is thread-based; switching to `async`+`aiohttp` could reduce overhead.
+* Batch processing is supported but not fully optimized for very large numbers of agents.
 
 Contributions via pull request are welcome.
 
