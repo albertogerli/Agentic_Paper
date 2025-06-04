@@ -1,9 +1,8 @@
 """
-Sistema Multi-Agente per la Revisione di Paper Scientifici.
-Versione alternativa senza dipendenza dal framework 'agents'.
+Multi-Agent System for Scientific Paper Review.
+Alternative version without relying on the ``agents`` framework.
 
-Questo sistema usa le OpenAI API direttamente invece del framework
-`agents`.
+This system uses the OpenAI APIs directly instead of ``agents``.
 """
 
 import os
@@ -26,9 +25,9 @@ from functools import lru_cache
 import aiohttp
 import pdfplumber
 
-# Configurazione logging
+# Logging configuration
 def setup_logging(log_level: str = "INFO") -> logging.Logger:
-    """Configura il sistema di logging."""
+    """Configure the logging system."""
     logger = logging.getLogger("paper_review_system")
     logger.setLevel(getattr(logging, log_level.upper()))
     
@@ -56,14 +55,14 @@ logger = setup_logging()
 
 @dataclass
 class Config:
-    """Configurazione centralizzata del sistema."""
+    """Centralized configuration for the system."""
     api_key: str = field(default_factory=lambda: os.environ.get("OPENAI_API_KEY", ""))
     model_powerful: str = "o3"
     model_standard: str = "gpt-4.1"
     model_basic: str = "gpt-4.1-mini"
     output_dir: str = "output_revisione_paper"
     max_parallel_agents: int = 3
-    agent_timeout: int = 300  # secondi
+    agent_timeout: int = 300  # seconds
     temperature_methodology: float = 1
     temperature_results: float = 1
     temperature_literature: float = 1
@@ -73,11 +72,11 @@ class Config:
     temperature_ethics: float = 1
     temperature_coordinator: float = 1
     temperature_editor: float = 1
-    temperature_ai_origin: float = 1  # Nuova temperatura per AI Origin Detector
+    temperature_ai_origin: float = 1  # New temperature for AI Origin Detector
     
     @classmethod
     def from_yaml(cls, path: str) -> 'Config':
-        """Carica configurazione da file YAML."""
+        """Load configuration from a YAML file."""
         try:
             with open(path, 'r') as f:
                 data = yaml.safe_load(f)
@@ -90,14 +89,14 @@ class Config:
             return cls()
     
     def validate(self) -> bool:
-        """Valida la configurazione."""
+        """Validate the configuration."""
         if not self.api_key:
             raise ValueError("API key not configured. Set OPENAI_API_KEY environment variable.")
         return True
 
-# Implementazione alternativa del sistema di agenti
+# Alternative implementation of the agent system
 class Agent:
-    """Implementazione semplificata di un agente usando OpenAI API."""
+    """Simplified implementation of an agent using the OpenAI API."""
     
     def __init__(self, name: str, instructions: str, model: str, temperature: float = 0.7):
         self.name = name
@@ -108,7 +107,7 @@ class Agent:
         self._init_client()
     
     def _init_client(self):
-        """Inizializza il client OpenAI."""
+        """Initialize the OpenAI client."""
         config = Config()
         if config.api_key:
             self.client = OpenAI(api_key=config.api_key)
@@ -118,16 +117,16 @@ class Agent:
     
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=60))
     def run(self, message: str) -> str:
-        """Esegue l'agente con il messaggio dato."""
+        """Run the agent with the given message."""
         if not self.client:
             raise ValueError("OpenAI client not initialized")
         
-        # Verifica che il messaggio non sia vuoto
+        # Verify that the message is not empty
         if not message or not message.strip():
             raise ValueError("Message content cannot be empty")
         
         try:
-            # Alcuni modelli (o1-preview, o1-mini) supportano solo temperatures=1
+            # Some models (o1-preview, o1-mini) only support temperature=1
             temperature = self.temperature if self.model not in ["o1-preview", "o1-mini"] else 1
             
             response = self.client.chat.completions.create(
@@ -151,7 +150,7 @@ class Agent:
 
 
 class AsyncAgent(Agent):
-    """Versione asincrona dell'agente."""
+    """Asynchronous version of the agent."""
 
     async def arun(self, message: str) -> str:
         if not message or not message.strip():
@@ -174,7 +173,7 @@ class AsyncAgent(Agent):
 
 
 class CachingAsyncAgent(AsyncAgent):
-    """Agente asincrono con caching dei risultati."""
+    """Asynchronous agent with result caching."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -190,7 +189,7 @@ class CachingAsyncAgent(AsyncAgent):
 
 @dataclass
 class PaperInfo:
-    """Informazioni strutturate sul paper."""
+    """Structured information about the paper."""
     title: str
     authors: str
     abstract: str
@@ -199,7 +198,7 @@ class PaperInfo:
     file_path: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
-        """Converte in dizionario."""
+        """Convert to dictionary."""
         return {
             "title": self.title,
             "authors": self.authors,
@@ -210,14 +209,14 @@ class PaperInfo:
         }
 
 class FileManager:
-    """Gestisce le operazioni su file con gestione degli errori."""
+    """Handle file operations with error management."""
     
     def __init__(self, output_dir: str):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(exist_ok=True)
     
     def save_json(self, data: Any, filename: str) -> bool:
-        """Salva dati in formato JSON con gestione errori."""
+        """Save data in JSON format with error handling."""
         filepath = self.output_dir / filename
         try:
             with open(filepath, 'w', encoding='utf-8') as f:
@@ -229,7 +228,7 @@ class FileManager:
             return False
     
     def save_text(self, text: str, filename: str) -> bool:
-        """Salva testo in un file con gestione errori."""
+        """Save text to a file with error handling."""
         filepath = self.output_dir / filename
         try:
             with open(filepath, 'w', encoding='utf-8') as f:
@@ -241,7 +240,7 @@ class FileManager:
             return False
 
     def extract_text_from_pdf(self, pdf_path: str) -> str:
-        """Restituisce il testo concatenato di tutte le pagine di un PDF."""
+        """Return the concatenated text from all pages of a PDF."""
         if not Path(pdf_path).exists():
             logger.error(f"PDF not found: {pdf_path}")
             return ""
@@ -258,7 +257,7 @@ class FileManager:
             return ""
     
     def save_review(self, reviewer_name: str, review_content: str) -> str:
-        """Salva la revisione di un revisore."""
+        """Save a review from a reviewer."""
         filename = f"review_{reviewer_name.replace(' ', '_')}.txt"
         success = self.save_text(review_content, filename)
         if success:
@@ -267,7 +266,7 @@ class FileManager:
             return f"Error saving review for {reviewer_name}"
     
     def get_reviews(self) -> Dict[str, str]:
-        """Recupera tutte le revisioni salvate."""
+        """Retrieve all saved reviews."""
         reviews = {}
         
         if not self.output_dir.exists():
@@ -288,7 +287,7 @@ class FileManager:
         return reviews
     
     def read_paper(self, file_path: str) -> Optional[str]:
-        """Legge il contenuto di un paper con gestione encoding multipli."""
+        """Read the content of a paper handling multiple encodings."""
         encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
         
         for encoding in encodings:
@@ -310,16 +309,16 @@ class FileManager:
         return None
 
 class PaperAnalyzer:
-    """Analizza e estrae informazioni dal paper."""
+    """Analyze and extract information from the paper."""
     
     @staticmethod
     def extract_info(paper_text: str) -> PaperInfo:
-        """Estrae informazioni strutturate dal paper."""
-        # Estrai titolo
+        """Extract structured information from the paper."""
+        # Extract title
         lines = paper_text.split('\n')
         title = next((line.strip() for line in lines if line.strip()), "Unknown title")
         
-        # Cerca autori con pattern migliorato
+        # Search for authors with an improved pattern
         author_patterns = [
             r'(?:Authors?|by|Autori|di):\s*([^\n]+)',
             r'^\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+(?:,\s*[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)*)',
@@ -333,12 +332,12 @@ class PaperAnalyzer:
                 authors = match.group(1).strip()
                 break
         
-        # Cerca abstract con pattern migliorato
+        # Search for the abstract with an improved pattern
         abstract_pattern = r'(?:Abstract|Summary|Riassunto|Sommario)[:.\n]\s*([^\n]+(?:\n[^\n]+)*?)(?:\n\n|\n[A-Z]|\n\d+\.|$)'
         abstract_match = re.search(abstract_pattern, paper_text, re.IGNORECASE | re.DOTALL)
         abstract = abstract_match.group(1).strip() if abstract_match else "Abstract not found"
         
-        # Identifica sezioni
+        # Identify sections
         sections = PaperAnalyzer._identify_sections(paper_text)
         
         return PaperInfo(
@@ -351,9 +350,9 @@ class PaperAnalyzer:
     
     @staticmethod
     def _identify_sections(paper_text: str) -> List[str]:
-        """Identifica le principali sezioni del paper con approccio migliorato."""
+        """Identify the main sections of the paper using an improved approach."""
         
-        # Sezioni standard comuni nei paper scientifici
+        # Common standard sections in scientific papers
         standard_sections = [
             "Abstract", "Introduction", "Background", "Related Work", "Literature Review",
             "Methods", "Methodology", "Materials and Methods", "Experimental Setup",
@@ -366,24 +365,24 @@ class PaperAnalyzer:
         sections_found = []
         lines = paper_text.split('\n')
         
-        # Pattern per identificare sezioni
+        # Patterns to identify sections
         section_patterns = [
-            # Sezioni numerate (1. Introduction, 2.1 Methods, etc.)
+            # Numbered sections (1. Introduction, 2.1 Methods, etc.)
             (r'^(?P<num>\d+(?:\.\d+)*)\s*\.?\s+(?P<title>[A-Z][A-Za-z\s\-:]+)$', True),
-            # Sezioni con numeri romani (I. Introduction, II. Methods)
+            # Sections with Roman numerals (I. Introduction, II. Methods)
             (r'^(?P<num>[IVX]+(?:\.[IVX]+)*)\s*\.?\s+(?P<title>[A-Z][A-Za-z\s\-:]+)$', True),
-            # Sezioni non numerate ma in caps (INTRODUCTION, METHODS)
+            # Unnumbered sections in all caps (INTRODUCTION, METHODS)
             (r'^(?P<title>[A-Z][A-Z\s\-]{2,})$', False),
-            # Sezioni standard con o senza numerazione
+            # Standard sections with or without numbering
             (r'^(?:\d+\.?\s+)?(?P<title>(?:' + '|'.join(standard_sections) + r'))\s*:?\s*$', False),
-            # Sezioni con markdown headers
+            # Sections using markdown headers
             (r'^#+\s+(?P<title>.+)$', False),
         ]
         
-        # Analizza linea per linea
+        # Analyze line by line
         for i, line in enumerate(lines):
             line = line.strip()
-            if not line or len(line) > 100:  # Skip linee vuote o troppo lunghe
+            if not line or len(line) > 100:  # Skip empty or very long lines
                 continue
                 
             for pattern, has_num in section_patterns:
@@ -391,47 +390,47 @@ class PaperAnalyzer:
                 if match:
                     title = match.group('title').strip()
                     
-                    # Filtra titoli troppo corti o troppo lunghi
+                    # Filter titles that are too short or too long
                     if 2 < len(title) < 50:
-                        # Verifica che non sia parte del testo normale controllando le linee vicine
+                        # Check that it is not regular text by inspecting nearby lines
                         prev_line = lines[i-1].strip() if i > 0 else ""
                         next_line = lines[i+1].strip() if i < len(lines)-1 else ""
                         
-                        # Se la linea precedente è vuota o la successiva sembra iniziare un nuovo paragrafo
+                        # If the previous line is empty or the next one seems to start a new paragraph
                         if (not prev_line or len(prev_line) < 10 or 
                             (next_line and (next_line[0].isupper() or not next_line[0].isalpha()))):
                             
-                            # Normalizza il titolo
+                            # Normalize the title
                             if has_num and match.group('num'):
                                 section_title = f"{match.group('num')}. {title.title()}"
                             else:
                                 section_title = title.title()
                             
-                            # Evita duplicati
+                            # Avoid duplicates
                             if section_title not in sections_found:
                                 sections_found.append(section_title)
                     break
         
-        # Se non ha trovato sezioni, prova un approccio euristico
+        # If no sections were found, try a heuristic approach
         if len(sections_found) < 3:
             sections_found = PaperAnalyzer._identify_sections_heuristic(paper_text, standard_sections)
         
-        # Limita a 20 sezioni e rimuovi quelle troppo simili
+        # Limit to 20 sections and remove very similar ones
         sections_found = PaperAnalyzer._filter_similar_sections(sections_found)[:20]
         
         return sections_found
 
     @staticmethod
     def _identify_sections_heuristic(paper_text: str, standard_sections: List[str]) -> List[str]:
-        """Approccio euristico per identificare sezioni quando i pattern falliscono."""
+        """Heuristic approach to identify sections when pattern matching fails."""
         sections_found = []
         text_lower = paper_text.lower()
         
-        # Cerca le sezioni standard nel testo
+        # Look for the standard sections in the text
         for section in standard_sections:
             section_lower = section.lower()
             
-            # Cerca varianti della sezione
+            # Look for variants of the section
             patterns = [
                 f"\n{section_lower}\n",
                 f"\n{section_lower}:",
@@ -452,19 +451,19 @@ class PaperAnalyzer:
 
     @staticmethod
     def _filter_similar_sections(sections: List[str]) -> List[str]:
-        """Rimuove sezioni duplicate o troppo simili."""
+        """Remove duplicate or overly similar sections."""
         filtered = []
         
         for section in sections:
-            # Normalizza per il confronto
+            # Normalize for comparison
             section_normalized = re.sub(r'^(?:\d+\.?\d*)\s*', '', section).lower()
             
-            # Verifica che non sia troppo simile a sezioni già aggiunte
+            # Verify that it is not too similar to sections already added
             is_duplicate = False
             for existing in filtered:
                 existing_normalized = re.sub(r'^(?:\d+\.?\d*)\s*', '', existing).lower()
                 
-                # Controlla similarità
+                # Check similarity
                 if (section_normalized == existing_normalized or
                     section_normalized in existing_normalized or
                     existing_normalized in section_normalized):
@@ -665,7 +664,7 @@ Provide a detailed analysis IN ENGLISH, outlining your findings and the reasons 
 Conclude with an estimated likelihood (e.g., Very Low, Low, Moderate, High, Very High) that the text has significant AI-generated portions.
 
 End your review with: "REVIEW COMPLETED - AI Origin Detector\"""",
-            model=self.config.model_standard, # o model_powerful a seconda della necessità
+            model=self.config.model_standard,  # or model_powerful depending on the need
             temperature=self.config.temperature_ai_origin,
         )
 
@@ -735,7 +734,7 @@ End with: "EDITORIAL DECISION COMPLETED" """,
         )
     
     def create_all_agents(self) -> Dict[str, Agent]:
-        """Crea tutti gli agenti necessari."""
+        """Create all the required agents."""
         return {
             "methodology": self.create_methodology_agent(),
             "results": self.create_results_agent(),
@@ -751,7 +750,7 @@ End with: "EDITORIAL DECISION COMPLETED" """,
         }
 
 class ReviewOrchestrator:
-    """Orchestratore principale del processo di revisione."""
+    """Main orchestrator for the review process."""
     
     def __init__(self, config: Config):
         self.config = config
@@ -760,34 +759,34 @@ class ReviewOrchestrator:
         self.agents = {}
     
     def execute_review_process(self, paper_text: str) -> Dict[str, Any]:
-        """Esegue il processo completo di revisione con gestione errori."""
+        """Execute the full review process with error handling."""
         try:
-            # Estrai informazioni sul paper
+            # Extract paper information
             paper_info = PaperAnalyzer.extract_info(paper_text)
             self.file_manager.save_json(paper_info.to_dict(), "paper_info.json")
             
             logger.info("Starting multi-agent peer review process...")
             
-            # Crea agenti
+            # Create agents
             self.agents = self.agent_factory.create_all_agents()
             
-            # Prepara messaggio iniziale
+            # Prepare initial message
             initial_message = self._prepare_initial_message(paper_info, paper_text)
             
-            # Esegui revisori principali
+            # Run main reviewers
             reviews = self._execute_main_reviewers(initial_message)
             
-            # Esegui coordinatore
+            # Run coordinator
             coordinator_review = self._execute_coordinator(reviews)
             reviews["coordinator"] = coordinator_review
             
-            # Esegui editor
+            # Run editor
             editor_decision = self._execute_editor(reviews)
             
-            # Sintetizza risultati
+            # Summarize results
             final_results = self._synthesize_results(paper_info, reviews, editor_decision)
             
-            # Genera report
+            # Generate reports
             self._generate_reports(final_results)
             
             return final_results
@@ -797,10 +796,10 @@ class ReviewOrchestrator:
             raise
     
     def _prepare_initial_message(self, paper_info: PaperInfo, paper_text: str) -> str:
-        """Prepara il messaggio iniziale per gli agenti."""
+        """Prepare the initial message for the agents."""
 
-        # Manteniamo sempre il testo completo del paper. Se supera la soglia
-        # consigliata per alcuni modelli, emettiamo solo un avviso di log.
+        # Always keep the full text of the paper. If it exceeds the
+        # recommended threshold for some models, only log a warning.
         display_paper_text = paper_text
         original_length = len(paper_text)
 
@@ -836,7 +835,7 @@ The paper content is as follows:
         )
     
     def _execute_main_reviewers(self, initial_message: str) -> Dict[str, str]:
-        """Esegue i revisori principali usando batch asincroni."""
+        """Run the main reviewers using asynchronous batches."""
         main_agents = [
             "methodology",
             "results",
@@ -851,7 +850,7 @@ The paper content is as follows:
         return asyncio.run(self._batch_process_agents(main_agents, initial_message))
 
     async def _batch_process_agents(self, agent_names: List[str], message: str) -> Dict[str, str]:
-        """Esegue più agenti in parallelo con asyncio."""
+        """Execute multiple agents in parallel using asyncio."""
         tasks = []
         for name in agent_names:
             agent = self.agents.get(name)
@@ -875,10 +874,10 @@ The paper content is as follows:
         return reviews
     
     def _run_agent_with_review(self, agent: Agent, message: str, agent_name: str) -> str:
-        """Esegue un agente e salva la sua revisione."""
+        """Run an agent and save its review."""
         try:
             review = agent.run(message)
-            # Salva la revisione
+            # Save the review
             self.file_manager.save_review(agent_name, review)
             return review
         except Exception as e:
@@ -886,13 +885,13 @@ The paper content is as follows:
             raise
     
     def _execute_coordinator(self, reviews: Dict[str, str]) -> str:
-        """Esegue il coordinatore con tutte le revisioni."""
+        """Run the coordinator with all reviews."""
         coordinator = self.agents.get("coordinator")
         if not coordinator:
             logger.error("Coordinator agent not found")
             return "Coordinator review not available"
         
-        # Prepara messaggio con tutte le revisioni
+        # Prepare message with all the reviews
         reviews_text = "\n\n".join([
             f"=== {agent_name.upper()} REVIEW ===\n{review_content}"
             for agent_name, review_content in reviews.items()
@@ -915,13 +914,13 @@ Please provide your comprehensive coordinator assessment based on all these revi
             return f"Error in coordinator assessment: {str(e)}"
     
     def _execute_editor(self, all_reviews: Dict[str, str]) -> str:
-        """Esegue l'editor per la decisione finale."""
+        """Run the editor to produce the final decision."""
         editor = self.agents.get("editor")
         if not editor:
             logger.error("Editor agent not found")
             return "Editorial decision not available"
         
-        # Prepara messaggio con tutte le revisioni incluso coordinatore
+        # Prepare message with all reviews including the coordinator
         reviews_text = "\n\n".join([
             f"=== {agent_name.upper()} REVIEW ===\n{review_content}"
             for agent_name, review_content in all_reviews.items()
@@ -943,9 +942,9 @@ Please provide your editorial decision based on all these reviews.
             logger.error(f"Error in editor: {e}")
             return f"Error in editorial decision: {str(e)}"
     
-    def _synthesize_results(self, paper_info: PaperInfo, reviews: Dict[str, str], 
+    def _synthesize_results(self, paper_info: PaperInfo, reviews: Dict[str, str],
                           editor_decision: str) -> Dict[str, Any]:
-        """Sintetizza i risultati delle revisioni."""
+        """Summarize the results of the reviews."""
         return {
             "paper_info": paper_info.to_dict(),
             "reviews": reviews,
@@ -962,7 +961,7 @@ Please provide your editorial decision based on all these reviews.
         }
     
     def _generate_reports(self, results: Dict[str, Any]) -> None:
-        """Genera report in vari formati."""
+        """Generate reports in various formats."""
         # Report Markdown
         report_md = self._generate_markdown_report(results)
         self.file_manager.save_text(report_md, f"review_report_{datetime.now():%Y%m%d_%H%M%S}.md")
@@ -979,7 +978,7 @@ Please provide your editorial decision based on all these reviews.
         self.file_manager.save_text(dashboard, f"dashboard_{datetime.now():%Y%m%d_%H%M%S}.html")
     
     def _generate_markdown_report(self, results: Dict[str, Any]) -> str:
-        """Genera report dettagliato in Markdown."""
+        """Generate a detailed report in Markdown format."""
         paper_info = results["paper_info"]
         reviews = results["reviews"]
         editor_decision = results["editor_decision"]
@@ -1044,7 +1043,7 @@ Please provide your editorial decision based on all these reviews.
         return report
     
     def _generate_executive_summary(self, results: Dict[str, Any]) -> str:
-        """Genera sommario esecutivo."""
+        """Generate an executive summary."""
         paper_info = results["paper_info"]
         editor_decision = results["editor_decision"]
         coordinator_assessment = results["reviews"].get("coordinator", "")
@@ -1087,7 +1086,7 @@ For the complete detailed reviews, please refer to the full report.
 
 
 class ReviewDashboard:
-    """Genera un dashboard HTML strutturato e gradevole."""
+    """Generate a well-structured and pleasant HTML dashboard."""
 
     def generate_html_dashboard(self, results: Dict[str, Any]) -> str:
         """Create a modern, styled HTML dashboard for review results."""
@@ -1100,7 +1099,7 @@ class ReviewDashboard:
             import html
             return html.escape(str(text))
         
-        # Estrai la decisione dell'editor (cerca pattern comuni)
+        # Extract the editor's decision (search common patterns)
         decision_class = "bg-gray-100"
         decision_icon = "📋"
         if "accept as is" in editor_decision.lower():
@@ -1116,11 +1115,11 @@ class ReviewDashboard:
             decision_class = "bg-red-100 border-red-300 text-red-900"
             decision_icon = "❌"
         
-        # Calcola statistiche
+        # Calculate statistics
         total_reviews = len(reviews)
         total_words = sum(len(review.split()) for review in reviews.values())
         
-        # HTML con design moderno
+        # HTML with modern design
         html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1354,7 +1353,7 @@ class ReviewDashboard:
             });
         });
         
-        // Gestione expand/collapse per abstract
+        // Handle expand/collapse for abstract
         const abstractContent = document.getElementById('abstract-content');
         const abstractToggle = document.getElementById('abstract-toggle');
         const abstractGradient = document.getElementById('abstract-gradient');
@@ -1376,7 +1375,7 @@ class ReviewDashboard:
                 }
             });
             
-            // Verifica se l'abstract è abbastanza corto da mostrarlo tutto
+            // Check if the abstract is short enough to show entirely
             if (abstractContent && abstractContent.scrollHeight <= 150) {
                 abstractToggle.style.display = 'none';
                 abstractGradient.style.display = 'none';
@@ -1390,7 +1389,7 @@ class ReviewDashboard:
         return html
 
 def system_health_check(config: Config) -> Dict[str, Any]:
-    """Esegue un controllo di base dell'integrità del sistema."""
+    """Perform a basic integrity check of the system."""
     report: Dict[str, Any] = {"storage_ok": Path(config.output_dir).exists()}
     start = time.time()
     try:
@@ -1405,7 +1404,7 @@ def system_health_check(config: Config) -> Dict[str, Any]:
     return report
 
 def main():
-    """Funzione principale con gestione errori migliorata."""
+    """Main function with improved error handling."""
     import argparse
     
     parser = argparse.ArgumentParser(
@@ -1418,22 +1417,22 @@ def main():
     
     args = parser.parse_args()
     
-    # Setup logging con livello specificato
+    # Setup logging with specified level
     global logger
     logger = setup_logging(args.log_level)
     
     try:
-        # Carica configurazione
+        # Load configuration
         config = Config.from_yaml(args.config)
         if args.output_dir:
             config.output_dir = args.output_dir
         
-        # Valida configurazione
+        # Validate configuration
         config.validate()
         health = system_health_check(config)
         logger.info(f"System health: {health}")
         
-        # Leggi paper (PDF o testo)
+        # Read paper (PDF or text)
         file_manager = FileManager(config.output_dir)
         if args.paper_path.lower().endswith(".pdf"):
             paper_text = file_manager.extract_text_from_pdf(args.paper_path)
@@ -1446,7 +1445,7 @@ def main():
         
         logger.info(f"Paper loaded successfully. Length: {len(paper_text):,} characters")
         
-        # Esegui processo di revisione
+        # Run review process
         orchestrator = ReviewOrchestrator(config)
         results = orchestrator.execute_review_process(paper_text)
         
