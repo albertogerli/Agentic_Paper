@@ -16,11 +16,15 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from io import StringIO
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from abc import ABC, abstractmethod
 import yaml
-from openai import OpenAI
+from openai import OpenAI, AsyncOpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
+from functools import lru_cache
+import aiohttp
+import pdfplumber
 
 # Configurazione logging
 def setup_logging(log_level: str = "INFO") -> logging.Logger:
@@ -145,6 +149,45 @@ class Agent:
             logger.error(f"Error in agent {self.name}: {e}")
             raise
 
+
+class AsyncAgent(Agent):
+    """Versione asincrona dell'agente."""
+
+    async def arun(self, message: str) -> str:
+        if not message or not message.strip():
+            raise ValueError("Message content cannot be empty")
+
+        client = AsyncOpenAI(api_key=Config().api_key)
+        temperature = self.temperature if self.model not in ["o1-preview", "o1-mini"] else 1
+        response = await client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": self.instructions},
+                {"role": "user", "content": message}
+            ],
+            temperature=temperature,
+            max_completion_tokens=4000,
+        )
+        result = response.choices[0].message.content
+        logger.info(f"Async agent {self.name} completed successfully")
+        return result
+
+
+class CachingAsyncAgent(AsyncAgent):
+    """Agente asincrono con caching dei risultati."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._cache: Dict[int, str] = {}
+
+    async def arun(self, message: str) -> str:
+        key = hash(message)
+        if key in self._cache:
+            return self._cache[key]
+        result = await super().arun(message)
+        self._cache[key] = result
+        return result
+
 @dataclass
 class PaperInfo:
     """Informazioni strutturate sul paper."""
@@ -196,6 +239,23 @@ class FileManager:
         except Exception as e:
             logger.error(f"Error saving text file {filepath}: {e}")
             return False
+
+    def extract_text_from_pdf(self, pdf_path: str) -> str:
+        """Restituisce il testo concatenato di tutte le pagine di un PDF."""
+        if not Path(pdf_path).exists():
+            logger.error(f"PDF not found: {pdf_path}")
+            return ""
+        text_buf = StringIO()
+        try:
+            with pdfplumber.open(pdf_path) as pdf:
+                for page in pdf.pages:
+                    page_text = page.extract_text(x_tolerance=1.5, y_tolerance=1.5)
+                    text_buf.write(page_text or "")
+                    text_buf.write("\n\n")
+            return text_buf.getvalue()
+        except Exception as e:
+            logger.error(f"PDF extraction failed: {e}")
+            return ""
     
     def save_review(self, reviewer_name: str, review_content: str) -> str:
         """Salva la revisione di un revisore."""
@@ -504,6 +564,14 @@ End your review with: "REVIEW COMPLETED - AI Origin Detector\"""",
             model=self.config.model_standard, # o model_powerful a seconda della necessità
             temperature=self.config.temperature_ai_origin,
         )
+
+    def create_hallucination_detector(self) -> Agent:
+        return Agent(
+            name="Hallucination_Detector",
+            instructions="""You are tasked with spotting potential hallucinations in the paper. Look for:\n1. Claims lacking citations\n2. Data inconsistent with official sources\n3. Conclusions not supported by presented data\n4. Invented or malformed references\nProvide a concise report IN ENGLISH detailing any suspicious statements.""",
+            model="gpt-4o-2024-05-13",
+            temperature=self.config.temperature_standard if hasattr(self.config, 'temperature_standard') else 1,
+        )
     
     def create_coordinator_agent(self) -> Agent:
         return Agent(
@@ -573,6 +641,7 @@ End with: "EDITORIAL DECISION COMPLETED" """,
             "contradiction": self.create_contradiction_agent(),
             "ethics": self.create_ethics_agent(),
             "ai_origin": self.create_ai_origin_detector_agent(),
+            "hallucination": self.create_hallucination_detector(),
             "coordinator": self.create_coordinator_agent(),
             "editor": self.create_editor_agent()
         }
@@ -663,30 +732,42 @@ The paper content is as follows:
         )
     
     def _execute_main_reviewers(self, initial_message: str) -> Dict[str, str]:
-        """Esegue i revisori principali in parallelo."""
-        reviews = {}
-        main_agents = ["methodology", "results", "literature", "structure", 
-                       "impact", "contradiction", "ethics", "ai_origin"]
-        
-        with ThreadPoolExecutor(max_workers=self.config.max_parallel_agents) as executor:
-            future_to_agent = {}
-            
-            for agent_name in main_agents:
-                if agent_name in self.agents:
-                    agent = self.agents[agent_name]
-                    future = executor.submit(self._run_agent_with_review, agent, initial_message, agent_name)
-                    future_to_agent[future] = agent_name
-            
-            for future in as_completed(future_to_agent, timeout=self.config.agent_timeout * len(main_agents)):
-                agent_name = future_to_agent[future]
-                try:
-                    review = future.result()
-                    reviews[agent_name] = review
-                    logger.info(f"Review completed: {agent_name}")
-                except Exception as e:
-                    logger.error(f"Error in agent {agent_name}: {e}")
-                    reviews[agent_name] = f"Error during review: {str(e)}"
-        
+        """Esegue i revisori principali usando batch asincroni."""
+        main_agents = [
+            "methodology",
+            "results",
+            "literature",
+            "structure",
+            "impact",
+            "contradiction",
+            "ethics",
+            "ai_origin",
+            "hallucination",
+        ]
+        return asyncio.run(self._batch_process_agents(main_agents, initial_message))
+
+    async def _batch_process_agents(self, agent_names: List[str], message: str) -> Dict[str, str]:
+        """Esegue più agenti in parallelo con asyncio."""
+        tasks = []
+        for name in agent_names:
+            agent = self.agents.get(name)
+            if not agent:
+                continue
+            if isinstance(agent, AsyncAgent):
+                tasks.append(asyncio.create_task(agent.arun(message)))
+            else:
+                loop = asyncio.get_running_loop()
+                tasks.append(loop.run_in_executor(None, agent.run, message))
+
+        results_list = await asyncio.gather(*tasks, return_exceptions=True)
+        reviews: Dict[str, str] = {}
+        for name, result in zip(agent_names, results_list):
+            if isinstance(result, Exception):
+                logger.error(f"Error in agent {name}: {result}")
+                reviews[name] = f"Error during review: {result}"
+            else:
+                reviews[name] = result
+                self.file_manager.save_review(name, result)
         return reviews
     
     def _run_agent_with_review(self, agent: Agent, message: str, agent_name: str) -> str:
@@ -788,6 +869,10 @@ Please provide your editorial decision based on all these reviews.
         # Executive summary
         summary = self._generate_executive_summary(results)
         self.file_manager.save_text(summary, f"executive_summary_{datetime.now():%Y%m%d_%H%M%S}.md")
+
+        # Dashboard HTML
+        dashboard = ReviewDashboard().generate_html_dashboard(results)
+        self.file_manager.save_text(dashboard, f"dashboard_{datetime.now():%Y%m%d_%H%M%S}.html")
     
     def _generate_markdown_report(self, results: Dict[str, Any]) -> str:
         """Genera report dettagliato in Markdown."""
@@ -834,8 +919,17 @@ Please provide your editorial decision based on all these reviews.
 """
         
         # Aggiungi revisioni individuali
-        review_order = ["methodology", "results", "literature", "structure", 
-                       "impact", "contradiction", "ethics", "ai_origin"]
+        review_order = [
+            "methodology",
+            "results",
+            "literature",
+            "structure",
+            "impact",
+            "contradiction",
+            "ethics",
+            "ai_origin",
+            "hallucination",
+        ]
         
         for agent_type in review_order:
             if agent_type in reviews:
@@ -887,6 +981,89 @@ For the complete detailed reviews, please refer to the full report.
         
         return summary
 
+
+class ReviewDashboard:
+    """Genera un dashboard HTML strutturato e gradevole."""
+
+    def generate_html_dashboard(self, results: Dict[str, Any]) -> str:
+        """Create a styled HTML page summarising the review results using Tailwind CSS."""
+        paper = results.get("paper_info", {})
+        reviews = results.get("reviews", {})
+        timestamp = results.get("timestamp", "")
+        editor_decision = results.get("editor_decision", "")
+
+        def esc(text: str) -> str:
+            import html
+            return html.escape(text)
+
+        html_parts = [
+            "<html>",
+            "<head>",
+            "<meta charset='utf-8'>",
+            "<title>APRS Review Dashboard</title>",
+            "<link href='https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css' rel='stylesheet'>",
+            "</head>",
+            "<body class='bg-gray-100 p-8 font-sans'>",
+            f"<h1 class='text-3xl font-bold mb-4'>Peer Review Results</h1>",
+            f"<p class='text-sm mb-6'><strong>Generated:</strong> {esc(timestamp)}</p>",
+            "<section class='bg-white p-6 rounded-lg shadow mb-6'>",
+            "<h2 class='text-2xl font-semibold mb-2'>Paper Information</h2>",
+            "<ul class='list-disc ml-6'>",
+            f"<li><strong>Title:</strong> {esc(paper.get('title',''))}</li>",
+            f"<li><strong>Authors:</strong> {esc(paper.get('authors',''))}</li>",
+            f"<li><strong>Length:</strong> {paper.get('length','')} characters</li>",
+            "</ul>",
+            "</section>",
+            "<section class='bg-white p-6 rounded-lg shadow mb-6'>",
+            "<h2 class='text-2xl font-semibold mb-2'>Editorial Decision</h2>",
+            f"<p>{esc(editor_decision)}</p>",
+            "</section>",
+            "<section class='bg-white p-6 rounded-lg shadow mb-6'>",
+            "<h2 class='text-2xl font-semibold mb-2'>Review Summary</h2>",
+            "<table class='min-w-full table-auto mb-4'>",
+            "<thead><tr class='bg-gray-200'><th class='px-4 py-2 text-left'>Reviewer</th><th class='px-4 py-2 text-left'>Word Count</th></tr></thead>",
+            "<tbody>",
+        ]
+
+        for name, review in reviews.items():
+            html_parts.append(
+                f"<tr><td class='border px-4 py-2'>{esc(name)}</td><td class='border px-4 py-2'>{len(review.split())}</td></tr>"
+            )
+
+        html_parts.extend([
+            "</tbody>",
+            "</table>",
+            "</section>",
+        ])
+
+        for name, review in reviews.items():
+            html_parts.extend([
+                "<section class='bg-white p-6 rounded-lg shadow mb-6'>",
+                f"<details><summary class='font-semibold cursor-pointer'>{esc(name.replace('_',' ').title())}</summary>",
+                f"<pre class='whitespace-pre-wrap mt-2'>{esc(review)}</pre>",
+                "</details>",
+                "</section>",
+            ])
+
+        html_parts.extend(["</body>", "</html>"])
+        return "\n".join(html_parts)
+
+
+def system_health_check(config: Config) -> Dict[str, Any]:
+    """Esegue un controllo di base dell'integrità del sistema."""
+    report: Dict[str, Any] = {"storage_ok": Path(config.output_dir).exists()}
+    start = time.time()
+    try:
+        client = OpenAI(api_key=config.api_key)
+        client.models.list()
+        report["api_latency"] = time.time() - start
+        report["api_ok"] = True
+    except Exception as e:
+        report["api_ok"] = False
+        report["api_error"] = str(e)
+        report["api_latency"] = None
+    return report
+
 def main():
     """Funzione principale con gestione errori migliorata."""
     import argparse
@@ -913,10 +1090,15 @@ def main():
         
         # Valida configurazione
         config.validate()
+        health = system_health_check(config)
+        logger.info(f"System health: {health}")
         
-        # Leggi paper
+        # Leggi paper (PDF o testo)
         file_manager = FileManager(config.output_dir)
-        paper_text = file_manager.read_paper(args.paper_path)
+        if args.paper_path.lower().endswith(".pdf"):
+            paper_text = file_manager.extract_text_from_pdf(args.paper_path)
+        else:
+            paper_text = file_manager.read_paper(args.paper_path)
         
         if not paper_text:
             logger.error("Failed to read paper file")
