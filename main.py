@@ -986,7 +986,8 @@ class ReviewDashboard:
     """Genera un dashboard HTML strutturato e gradevole."""
 
     def generate_html_dashboard(self, results: Dict[str, Any]) -> str:
-        """Create a styled HTML page summarising the review results."""
+
+        """Create a styled HTML page summarising the review results using Tailwind CSS."""
         paper = results.get("paper_info", {})
         reviews = results.get("reviews", {})
         timestamp = results.get("timestamp", "")
@@ -1001,6 +1002,15 @@ class ReviewDashboard:
             "<head>",
             "<meta charset='utf-8'>",
             "<title>APRS Review Dashboard</title>",
+            "<link href='https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css' rel='stylesheet'>",
+            "</head>",
+            "<body class='bg-gray-100 p-8 font-sans'>",
+            f"<h1 class='text-3xl font-bold mb-4'>Peer Review Results</h1>",
+            f"<p class='text-sm mb-6'><strong>Generated:</strong> {esc(timestamp)}</p>",
+            "<section class='bg-white p-6 rounded-lg shadow mb-6'>",
+            "<h2 class='text-2xl font-semibold mb-2'>Paper Information</h2>",
+            "<ul class='list-disc ml-6'>",
+
             "<style>",
             "body{font-family:Arial,Helvetica,sans-serif;margin:40px;line-height:1.6;background:#f9f9f9;}",
             "h1,h2{color:#2c3e50;}",
@@ -1023,6 +1033,24 @@ class ReviewDashboard:
             f"<li><strong>Length:</strong> {paper.get('length','')} characters</li>",
             "</ul>",
             "</section>",
+            "<section class='bg-white p-6 rounded-lg shadow mb-6'>",
+            "<h2 class='text-2xl font-semibold mb-2'>Editorial Decision</h2>",
+            f"<p>{esc(editor_decision)}</p>",
+            "</section>",
+            "<section class='bg-white p-6 rounded-lg shadow mb-6'>",
+            "<h2 class='text-2xl font-semibold mb-2'>Review Summary</h2>",
+            "<table class='min-w-full table-auto mb-4'>",
+            "<thead><tr class='bg-gray-200'><th class='px-4 py-2 text-left'>Reviewer</th><th class='px-4 py-2 text-left'>Word Count</th></tr></thead>",
+            "<tbody>",
+        ]
+
+        for name, review in reviews.items():
+            html_parts.append(
+                f"<tr><td class='border px-4 py-2'>{esc(name)}</td><td class='border px-4 py-2'>{len(review.split())}</td></tr>"
+            )
+
+        html_parts.extend([
+            "</tbody>",
             "<section>",
             "<h2>Editorial Decision</h2>",
             f"<p>{esc(editor_decision)}</p>",
@@ -1043,6 +1071,9 @@ class ReviewDashboard:
 
         for name, review in reviews.items():
             html_parts.extend([
+                "<section class='bg-white p-6 rounded-lg shadow mb-6'>",
+                f"<details><summary class='font-semibold cursor-pointer'>{esc(name.replace('_',' ').title())}</summary>",
+                f"<pre class='whitespace-pre-wrap mt-2'>{esc(review)}</pre>",
                 "<section>",
                 f"<details class='collapsible'><summary>{esc(name.replace('_',' ').title())}</summary>",
                 f"<pre>{esc(review)}</pre>",
@@ -1052,21 +1083,6 @@ class ReviewDashboard:
 
         html_parts.extend(["</body>", "</html>"])
         return "\n".join(html_parts)
-
-    """Genera un semplice dashboard HTML riassuntivo."""
-
-    def generate_html_dashboard(self, results: Dict[str, Any]) -> str:
-        html = ["<html><head><meta charset='utf-8'><title>Review Dashboard</title></head><body>"]
-        html.append(f"<h1>Review Results {results['timestamp']}</h1>")
-        html.append("<h2>Reviews</h2><ul>")
-        for name, review in results.get('reviews', {}).items():
-            html.append(f"<li>{name}: {len(review.split())} words</li>")
-        html.append("</ul>")
-        html.append(f"<h2>Editorial Decision</h2><p>{results.get('editor_decision','')}</p>")
-        html.append("</body></html>")
-        return "\n".join(html)
-
-
 
 def system_health_check(config: Config) -> Dict[str, Any]:
     """Esegue un controllo di base dell'integrità del sistema."""
