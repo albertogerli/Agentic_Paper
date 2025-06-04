@@ -33,7 +33,7 @@ Output includes:
 * Final editorial decision
 * Rich **Markdown report**, **executive summary**, and full **JSON** dump
   (all saved inside the chosen `output_dir`).
-* Lightweight HTML dashboard and health report
+* Styled HTML dashboard and health report
 
 ---
 

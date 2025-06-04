@@ -958,17 +958,74 @@ Please provide your editorial decision based on all these reviews.
 
 ## Coordinator's Overall Assessment
 
-{coordinator_assessment}
+    """Genera un dashboard HTML strutturato e gradevole."""
 
-## Review Summary
+        """Create a styled HTML page summarising the review results."""
+        paper = results.get("paper_info", {})
+        reviews = results.get("reviews", {})
+        timestamp = results.get("timestamp", "")
+        editor_decision = results.get("editor_decision", "")
 
-This paper has been reviewed by 8 specialized AI agents, each focusing on different aspects of the manuscript:
+        def esc(text: str) -> str:
+            import html
+            return html.escape(text)
 
-1. **Methodology Expert**: Evaluated experimental design and statistical rigor
-2. **Results Analyst**: Assessed data analysis and presentation
-3. **Literature Expert**: Reviewed contextualization and citations
-4. **Structure & Clarity Reviewer**: Analyzed organization and readability
-5. **Impact & Innovation Analyst**: Evaluated novelty and potential contribution
+        html_parts = [
+            "<html>",
+            "<head>",
+            "<meta charset='utf-8'>",
+            "<title>APRS Review Dashboard</title>",
+            "<style>",
+            "body{font-family:Arial,Helvetica,sans-serif;margin:40px;line-height:1.6;background:#f9f9f9;}",
+            "h1,h2{color:#2c3e50;}",
+            "section{margin-bottom:2em;padding:1em;background:#fff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.1);}",
+            "summary{font-weight:bold;cursor:pointer;}",
+            "pre{white-space:pre-wrap;background:#f3f3f3;padding:1em;border-radius:4px;overflow:auto;}",
+            "table{border-collapse:collapse;width:100%;margin-bottom:1em;}",
+            "th,td{border:1px solid #ddd;padding:8px;text-align:left;}",
+            "th{background:#f0f0f0;}",
+            "</style>",
+            "</head>",
+            "<body>",
+            f"<h1>Peer Review Results</h1>",
+            f"<p><strong>Generated:</strong> {esc(timestamp)}</p>",
+            "<section>",
+            "<h2>Paper Information</h2>",
+            "<ul>",
+            f"<li><strong>Title:</strong> {esc(paper.get('title',''))}</li>",
+            f"<li><strong>Authors:</strong> {esc(paper.get('authors',''))}</li>",
+            f"<li><strong>Length:</strong> {paper.get('length','')} characters</li>",
+            "</ul>",
+            "</section>",
+            "<section>",
+            "<h2>Editorial Decision</h2>",
+            f"<p>{esc(editor_decision)}</p>",
+            "</section>",
+            "<section>",
+            "<h2>Review Summary</h2>",
+            "<table>",
+            "<tr><th>Reviewer</th><th>Word Count</th></tr>",
+        ]
+
+        for name, review in reviews.items():
+            html_parts.append(f"<tr><td>{esc(name)}</td><td>{len(review.split())}</td></tr>")
+
+        html_parts.extend([
+            "</table>",
+            "</section>",
+        ])
+
+        for name, review in reviews.items():
+            html_parts.extend([
+                "<section>",
+                f"<details class='collapsible'><summary>{esc(name.replace('_',' ').title())}</summary>",
+                f"<pre>{esc(review)}</pre>",
+                "</details>",
+                "</section>",
+            ])
+
+        html_parts.extend(["</body>", "</html>"])
+        return "\n".join(html_parts)
 6. **Contradiction Checker**: Identified inconsistencies and logical issues
 7. **Ethics & Integrity Reviewer**: Assessed ethical compliance and transparency
 8. **AI Origin Detector**: Assessed the likelihood of AI authorship
