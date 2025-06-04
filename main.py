@@ -127,7 +127,7 @@ class Agent:
             raise ValueError("Message content cannot be empty")
         
         try:
-            # Alcuni modelli (o1-preview, o1-mini) supportano solo temperature=1
+            # Alcuni modelli (o1-preview, o1-mini) supportano solo temperatures=1
             temperature = self.temperature if self.model not in ["o1-preview", "o1-mini"] else 1
             
             response = self.client.chat.completions.create(
@@ -344,35 +344,137 @@ class PaperAnalyzer:
         return PaperInfo(
             title=title,
             authors=authors,
-            abstract=abstract[:500] + "..." if len(abstract) > 500 else abstract,
+            abstract=abstract,
             length=len(paper_text),
             sections=sections
         )
     
     @staticmethod
     def _identify_sections(paper_text: str) -> List[str]:
-        """Identifica le principali sezioni del paper con pattern migliorato."""
-        section_patterns = [
-            r'(?:^|\n)#+\s*([^\n]+)',  # Markdown headers
-            r'(?:^|\n)(\d+\.?\s+[A-Z][^\n]+)',  # Numbered sections
-            r'(?:^|\n)([A-Z][A-Z\s]{2,})\n',  # All caps headers
-            r'(?:^|\n)([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\n(?:-{3,}|={3,})',  # Underlined headers
+        """Identifica le principali sezioni del paper con approccio migliorato."""
+        
+        # Sezioni standard comuni nei paper scientifici
+        standard_sections = [
+            "Abstract", "Introduction", "Background", "Related Work", "Literature Review",
+            "Methods", "Methodology", "Materials and Methods", "Experimental Setup",
+            "Results", "Experiments", "Evaluation", "Findings",
+            "Discussion", "Analysis", "Implications", 
+            "Conclusion", "Conclusions", "Future Work", "Limitations",
+            "References", "Bibliography", "Acknowledgments", "Appendix"
         ]
         
-        sections = []
-        for pattern in section_patterns:
-            matches = re.findall(pattern, paper_text, re.MULTILINE)
-            sections.extend([m.strip() for m in matches if len(m.strip()) > 2])
+        sections_found = []
+        lines = paper_text.split('\n')
         
-        # Rimuovi duplicati mantenendo l'ordine
-        seen = set()
-        unique_sections = []
+        # Pattern per identificare sezioni
+        section_patterns = [
+            # Sezioni numerate (1. Introduction, 2.1 Methods, etc.)
+            (r'^(?P<num>\d+(?:\.\d+)*)\s*\.?\s+(?P<title>[A-Z][A-Za-z\s\-:]+)$', True),
+            # Sezioni con numeri romani (I. Introduction, II. Methods)
+            (r'^(?P<num>[IVX]+(?:\.[IVX]+)*)\s*\.?\s+(?P<title>[A-Z][A-Za-z\s\-:]+)$', True),
+            # Sezioni non numerate ma in caps (INTRODUCTION, METHODS)
+            (r'^(?P<title>[A-Z][A-Z\s\-]{2,})$', False),
+            # Sezioni standard con o senza numerazione
+            (r'^(?:\d+\.?\s+)?(?P<title>(?:' + '|'.join(standard_sections) + r'))\s*:?\s*$', False),
+            # Sezioni con markdown headers
+            (r'^#+\s+(?P<title>.+)$', False),
+        ]
+        
+        # Analizza linea per linea
+        for i, line in enumerate(lines):
+            line = line.strip()
+            if not line or len(line) > 100:  # Skip linee vuote o troppo lunghe
+                continue
+                
+            for pattern, has_num in section_patterns:
+                match = re.match(pattern, line, re.IGNORECASE)
+                if match:
+                    title = match.group('title').strip()
+                    
+                    # Filtra titoli troppo corti o troppo lunghi
+                    if 2 < len(title) < 50:
+                        # Verifica che non sia parte del testo normale controllando le linee vicine
+                        prev_line = lines[i-1].strip() if i > 0 else ""
+                        next_line = lines[i+1].strip() if i < len(lines)-1 else ""
+                        
+                        # Se la linea precedente è vuota o la successiva sembra iniziare un nuovo paragrafo
+                        if (not prev_line or len(prev_line) < 10 or 
+                            (next_line and (next_line[0].isupper() or not next_line[0].isalpha()))):
+                            
+                            # Normalizza il titolo
+                            if has_num and match.group('num'):
+                                section_title = f"{match.group('num')}. {title.title()}"
+                            else:
+                                section_title = title.title()
+                            
+                            # Evita duplicati
+                            if section_title not in sections_found:
+                                sections_found.append(section_title)
+                    break
+        
+        # Se non ha trovato sezioni, prova un approccio euristico
+        if len(sections_found) < 3:
+            sections_found = PaperAnalyzer._identify_sections_heuristic(paper_text, standard_sections)
+        
+        # Limita a 20 sezioni e rimuovi quelle troppo simili
+        sections_found = PaperAnalyzer._filter_similar_sections(sections_found)[:20]
+        
+        return sections_found
+
+    @staticmethod
+    def _identify_sections_heuristic(paper_text: str, standard_sections: List[str]) -> List[str]:
+        """Approccio euristico per identificare sezioni quando i pattern falliscono."""
+        sections_found = []
+        text_lower = paper_text.lower()
+        
+        # Cerca le sezioni standard nel testo
+        for section in standard_sections:
+            section_lower = section.lower()
+            
+            # Cerca varianti della sezione
+            patterns = [
+                f"\n{section_lower}\n",
+                f"\n{section_lower}:",
+                f"\n{section_lower}.",
+                f"\n1. {section_lower}",
+                f"\n2. {section_lower}",
+                f"\n3. {section_lower}",
+                f"\n4. {section_lower}",
+                f"\n5. {section_lower}",
+            ]
+            
+            for pattern in patterns:
+                if pattern in text_lower:
+                    sections_found.append(section)
+                    break
+        
+        return sections_found
+
+    @staticmethod
+    def _filter_similar_sections(sections: List[str]) -> List[str]:
+        """Rimuove sezioni duplicate o troppo simili."""
+        filtered = []
+        
         for section in sections:
-            if section not in seen:
-                seen.add(section)
-                unique_sections.append(section)
+            # Normalizza per il confronto
+            section_normalized = re.sub(r'^(?:\d+\.?\d*)\s*', '', section).lower()
+            
+            # Verifica che non sia troppo simile a sezioni già aggiunte
+            is_duplicate = False
+            for existing in filtered:
+                existing_normalized = re.sub(r'^(?:\d+\.?\d*)\s*', '', existing).lower()
+                
+                # Controlla similarità
+                if (section_normalized == existing_normalized or
+                    section_normalized in existing_normalized or
+                    existing_normalized in section_normalized):
+                    is_duplicate = True
+                    break
+            
+            if not is_duplicate:
+                filtered.append(section)
         
-        return unique_sections[:20]  # Limita a 20 sezioni
+        return filtered
 
 class AgentFactory:
     """Factory per creare agenti con configurazioni appropriate."""
@@ -518,6 +620,8 @@ Your task is to identify contradictions, inconsistencies, and logical problems i
 
 Be particularly attentive and critical, reporting precisely IN ENGLISH any identified problems,
 citing specific sections or passages of the paper.
+
+If you find no contradictions or significant inconsistencies, please state "No significant contradictions or inconsistencies were found after a careful review."
 
 End your review with: "REVIEW COMPLETED - Contradiction Checker" """,
             model=self.config.model_powerful,
@@ -986,103 +1090,304 @@ class ReviewDashboard:
     """Genera un dashboard HTML strutturato e gradevole."""
 
     def generate_html_dashboard(self, results: Dict[str, Any]) -> str:
-
-        """Create a styled HTML page summarising the review results using Tailwind CSS."""
+        """Create a modern, styled HTML dashboard for review results."""
         paper = results.get("paper_info", {})
         reviews = results.get("reviews", {})
         timestamp = results.get("timestamp", "")
         editor_decision = results.get("editor_decision", "")
-
+        
         def esc(text: str) -> str:
             import html
-            return html.escape(text)
-
-        html_parts = [
-            "<html>",
-            "<head>",
-            "<meta charset='utf-8'>",
-            "<title>APRS Review Dashboard</title>",
-            "<link href='https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css' rel='stylesheet'>",
-            "</head>",
-            "<body class='bg-gray-100 p-8 font-sans'>",
-            f"<h1 class='text-3xl font-bold mb-4'>Peer Review Results</h1>",
-            f"<p class='text-sm mb-6'><strong>Generated:</strong> {esc(timestamp)}</p>",
-            "<section class='bg-white p-6 rounded-lg shadow mb-6'>",
-            "<h2 class='text-2xl font-semibold mb-2'>Paper Information</h2>",
-            "<ul class='list-disc ml-6'>",
-
-            "<style>",
-            "body{font-family:Arial,Helvetica,sans-serif;margin:40px;line-height:1.6;background:#f9f9f9;}",
-            "h1,h2{color:#2c3e50;}",
-            "section{margin-bottom:2em;padding:1em;background:#fff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.1);}",
-            "summary{font-weight:bold;cursor:pointer;}",
-            "pre{white-space:pre-wrap;background:#f3f3f3;padding:1em;border-radius:4px;overflow:auto;}",
-            "table{border-collapse:collapse;width:100%;margin-bottom:1em;}",
-            "th,td{border:1px solid #ddd;padding:8px;text-align:left;}",
-            "th{background:#f0f0f0;}",
-            "</style>",
-            "</head>",
-            "<body>",
-            f"<h1>Peer Review Results</h1>",
-            f"<p><strong>Generated:</strong> {esc(timestamp)}</p>",
-            "<section>",
-            "<h2>Paper Information</h2>",
-            "<ul>",
-            f"<li><strong>Title:</strong> {esc(paper.get('title',''))}</li>",
-            f"<li><strong>Authors:</strong> {esc(paper.get('authors',''))}</li>",
-            f"<li><strong>Length:</strong> {paper.get('length','')} characters</li>",
-            "</ul>",
-            "</section>",
-            "<section class='bg-white p-6 rounded-lg shadow mb-6'>",
-            "<h2 class='text-2xl font-semibold mb-2'>Editorial Decision</h2>",
-            f"<p>{esc(editor_decision)}</p>",
-            "</section>",
-            "<section class='bg-white p-6 rounded-lg shadow mb-6'>",
-            "<h2 class='text-2xl font-semibold mb-2'>Review Summary</h2>",
-            "<table class='min-w-full table-auto mb-4'>",
-            "<thead><tr class='bg-gray-200'><th class='px-4 py-2 text-left'>Reviewer</th><th class='px-4 py-2 text-left'>Word Count</th></tr></thead>",
-            "<tbody>",
-        ]
-
-        for name, review in reviews.items():
-            html_parts.append(
-                f"<tr><td class='border px-4 py-2'>{esc(name)}</td><td class='border px-4 py-2'>{len(review.split())}</td></tr>"
-            )
-
-        html_parts.extend([
-            "</tbody>",
-            "<section>",
-            "<h2>Editorial Decision</h2>",
-            f"<p>{esc(editor_decision)}</p>",
-            "</section>",
-            "<section>",
-            "<h2>Review Summary</h2>",
-            "<table>",
-            "<tr><th>Reviewer</th><th>Word Count</th></tr>",
-        ]
-
-        for name, review in reviews.items():
-            html_parts.append(f"<tr><td>{esc(name)}</td><td>{len(review.split())}</td></tr>")
-
-        html_parts.extend([
-            "</table>",
-            "</section>",
-        ])
-
-        for name, review in reviews.items():
-            html_parts.extend([
-                "<section class='bg-white p-6 rounded-lg shadow mb-6'>",
-                f"<details><summary class='font-semibold cursor-pointer'>{esc(name.replace('_',' ').title())}</summary>",
-                f"<pre class='whitespace-pre-wrap mt-2'>{esc(review)}</pre>",
-                "<section>",
-                f"<details class='collapsible'><summary>{esc(name.replace('_',' ').title())}</summary>",
-                f"<pre>{esc(review)}</pre>",
-                "</details>",
-                "</section>",
-            ])
-
-        html_parts.extend(["</body>", "</html>"])
-        return "\n".join(html_parts)
+            return html.escape(str(text))
+        
+        # Estrai la decisione dell'editor (cerca pattern comuni)
+        decision_class = "bg-gray-100"
+        decision_icon = "📋"
+        if "accept as is" in editor_decision.lower():
+            decision_class = "bg-green-100 border-green-300 text-green-900"
+            decision_icon = "✅"
+        elif "minor revisions" in editor_decision.lower():
+            decision_class = "bg-blue-100 border-blue-300 text-blue-900"
+            decision_icon = "🔧"
+        elif "major revisions" in editor_decision.lower():
+            decision_class = "bg-yellow-100 border-yellow-300 text-yellow-900"
+            decision_icon = "⚠️"
+        elif "reject" in editor_decision.lower():
+            decision_class = "bg-red-100 border-red-300 text-red-900"
+            decision_icon = "❌"
+        
+        # Calcola statistiche
+        total_reviews = len(reviews)
+        total_words = sum(len(review.split()) for review in reviews.values())
+        
+        # HTML con design moderno
+        html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Paper Review Dashboard - {esc(paper.get('title', 'Untitled'))}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {{ font-family: 'Inter', sans-serif; }}
+        .gradient-bg {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }}
+        .review-card {{
+            transition: all 0.3s ease;
+        }}
+        .review-card:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 12px 24px rgba(0,0,0,0.1);
+        }}
+        .progress-bar {{
+            transition: width 1s ease-in-out;
+        }}
+        details summary {{
+            cursor: pointer;
+            user-select: none;
+        }}
+        details[open] summary {{
+            margin-bottom: 1rem;
+        }}
+        .review-content {{
+            max-height: 500px;
+            overflow-y: auto;
+        }}
+        .review-content::-webkit-scrollbar {{
+            width: 6px;
+        }}
+        .review-content::-webkit-scrollbar-track {{
+            background: #f1f1f1;
+        }}
+        .review-content::-webkit-scrollbar-thumb {{
+            background: #888;
+            border-radius: 3px;
+        }}
+        @keyframes fadeIn {{
+            from {{ opacity: 0; transform: translateY(20px); }}
+            to {{ opacity: 1; transform: translateY(0); }}
+        }}
+        .fade-in {{
+            animation: fadeIn 0.6s ease-out forwards;
+        }}
+    </style>
+</head>
+<body class="bg-gray-50">
+    <!-- Header -->
+    <div class="gradient-bg text-white">
+        <div class="container mx-auto px-6 py-12">
+            <h1 class="text-4xl font-bold mb-2">📚 Peer Review Dashboard</h1>
+            <p class="text-purple-100">Advanced Multi-Agent Review System</p>
+        </div>
+    </div>
+    
+    <!-- Main Content -->
+    <div class="container mx-auto px-6 py-8 max-w-7xl">
+        <!-- Paper Info Card -->
+        <div class="bg-white rounded-lg shadow-lg p-8 mb-8 fade-in">
+            <h2 class="text-2xl font-semibold mb-6 flex items-center">
+                <span class="bg-purple-100 text-purple-600 p-2 rounded-lg mr-3">📄</span>
+                Paper Information
+            </h2>
+            <div class="grid md:grid-cols-2 gap-6">
+                <div>
+                    <h3 class="text-sm font-medium text-gray-500 uppercase tracking-wide mb-2">Title</h3>
+                    <p class="text-lg font-medium text-gray-900">{esc(paper.get('title', 'Not specified'))}</p>
+                </div>
+                <div>
+                    <h3 class="text-sm font-medium text-gray-500 uppercase tracking-wide mb-2">Authors</h3>
+                    <p class="text-lg text-gray-700">{esc(paper.get('authors', 'Not specified'))}</p>
+                </div>
+                <div>
+                    <h3 class="text-sm font-medium text-gray-500 uppercase tracking-wide mb-2">Document Length</h3>
+                    <p class="text-lg text-gray-700">{paper.get('length', 0):,} characters</p>
+                </div>
+                <div>
+                    <h3 class="text-sm font-medium text-gray-500 uppercase tracking-wide mb-2">Review Date</h3>
+                    <p class="text-lg text-gray-700">{esc(timestamp)}</p>
+                </div>
+            </div>
+            {f"""
+            <div class="mt-6">
+                <h3 class="text-sm font-medium text-gray-500 uppercase tracking-wide mb-2">Abstract</h3>
+                <div class="relative">
+                    <div id="abstract-content" class="text-gray-700 leading-relaxed overflow-hidden transition-all duration-300" style="max-height: 150px;">
+                        <p>{esc(paper.get('abstract', 'Not available'))}</p>
+                    </div>
+                    <div id="abstract-gradient" class="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-white to-transparent pointer-events-none"></div>
+                    <button id="abstract-toggle" class="mt-2 text-purple-600 hover:text-purple-700 font-medium text-sm focus:outline-none">
+                        Show more ▼
+                    </button>
+                </div>
+            </div>
+            """ if paper.get('abstract') and len(paper.get('abstract', '')) > 300 else f"""
+            <div class="mt-6">
+                <h3 class="text-sm font-medium text-gray-500 uppercase tracking-wide mb-2">Abstract</h3>
+                <p class="text-gray-700 leading-relaxed">{esc(paper.get('abstract', 'Not available'))}</p>
+            </div>
+            """ if paper.get('abstract') else ""}
+        </div>
+        
+        <!-- Editorial Decision -->
+        <div class="bg-white rounded-lg shadow-lg p-8 mb-8 fade-in" style="animation-delay: 0.1s;">
+            <h2 class="text-2xl font-semibold mb-6 flex items-center">
+                <span class="text-2xl mr-3">{decision_icon}</span>
+                Editorial Decision
+            </h2>
+            <div class="{decision_class} border-2 rounded-lg p-6">
+                <pre class="whitespace-pre-wrap text-sm leading-relaxed">{esc(editor_decision)}</pre>
+            </div>
+        </div>
+        
+        <!-- Review Statistics -->
+        <div class="grid md:grid-cols-3 gap-6 mb-8">
+            <div class="bg-white rounded-lg shadow-lg p-6 text-center fade-in" style="animation-delay: 0.2s;">
+                <div class="text-3xl font-bold text-purple-600">{total_reviews}</div>
+                <div class="text-gray-600 mt-2">Expert Reviews</div>
+            </div>
+            <div class="bg-white rounded-lg shadow-lg p-6 text-center fade-in" style="animation-delay: 0.3s;">
+                <div class="text-3xl font-bold text-purple-600">{total_words:,}</div>
+                <div class="text-gray-600 mt-2">Total Words</div>
+            </div>
+            <div class="bg-white rounded-lg shadow-lg p-6 text-center fade-in" style="animation-delay: 0.4s;">
+                <div class="text-3xl font-bold text-purple-600">{total_words // max(total_reviews, 1)}</div>
+                <div class="text-gray-600 mt-2">Avg Words/Review</div>
+            </div>
+        </div>
+        
+        <!-- Individual Reviews -->
+        <div class="bg-white rounded-lg shadow-lg p-8 fade-in" style="animation-delay: 0.5s;">
+            <h2 class="text-2xl font-semibold mb-6 flex items-center">
+                <span class="bg-purple-100 text-purple-600 p-2 rounded-lg mr-3">👥</span>
+                Expert Reviews
+            </h2>
+            <div class="space-y-4">
+"""
+        
+        # Mappa per icone e colori dei revisori
+        reviewer_styles = {
+            "methodology": ("🔬", "bg-blue-50 border-blue-200"),
+            "results": ("📊", "bg-green-50 border-green-200"),
+            "literature": ("📚", "bg-yellow-50 border-yellow-200"),
+            "structure": ("🏗️", "bg-purple-50 border-purple-200"),
+            "impact": ("💡", "bg-pink-50 border-pink-200"),
+            "contradiction": ("⚡", "bg-red-50 border-red-200"),
+            "ethics": ("⚖️", "bg-indigo-50 border-indigo-200"),
+            "ai_origin": ("🤖", "bg-gray-50 border-gray-200"),
+            "hallucination": ("🔍", "bg-orange-50 border-orange-200"),
+            "coordinator": ("🎯", "bg-teal-50 border-teal-200"),
+        }
+        
+        # Ordine preferito per i revisori
+        review_order = ["coordinator", "methodology", "results", "literature", 
+                       "structure", "impact", "contradiction", "ethics", 
+                       "ai_origin", "hallucination"]
+        
+        # Aggiungi le review nell'ordine specificato
+        for reviewer_type in review_order:
+            if reviewer_type in reviews:
+                icon, style = reviewer_styles.get(reviewer_type, ("📝", "bg-gray-50 border-gray-200"))
+                review_content = reviews[reviewer_type]
+                word_count = len(review_content.split())
+                
+                html += f"""
+                    <details class="review-card {style} border-2 rounded-lg overflow-hidden">
+                        <summary class="p-6 hover:bg-gray-50 transition-colors">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center">
+                                    <span class="text-2xl mr-3">{icon}</span>
+                                    <div>
+                                        <h3 class="text-lg font-semibold">{reviewer_type.replace('_', ' ').title()}</h3>
+                                        <p class="text-sm text-gray-600">{word_count} words</p>
+                                    </div>
+                                </div>
+                                <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                </svg>
+                            </div>
+                        </summary>
+                        <div class="px-6 pb-6">
+                            <div class="review-content bg-white rounded-lg p-4 border border-gray-200">
+                                <pre class="whitespace-pre-wrap text-sm text-gray-700 leading-relaxed">{esc(review_content)}</pre>
+                            </div>
+                        </div>
+                    </details>
+"""
+        
+        html += """
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Footer -->
+    <footer class="bg-gray-800 text-white py-8 mt-16">
+        <div class="container mx-auto px-6 text-center">
+            <p class="text-gray-400">Generated by Advanced Multi-Agent Paper Review System</p>
+            <p class="text-sm text-gray-500 mt-2">Powered by OpenAI GPT Models</p>
+        </div>
+    </footer>
+    
+    <script>
+        // Smooth reveal animation on scroll
+        const observerOptions = {
+            threshold: 0.1,
+            rootMargin: '0px 0px -50px 0px'
+        };
+        
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('fade-in');
+                }
+            });
+        }, observerOptions);
+        
+        // Toggle animation for details
+        document.querySelectorAll('details').forEach(detail => {
+            detail.addEventListener('toggle', (e) => {
+                if (e.target.open) {
+                    e.target.querySelector('.review-content').style.animation = 'fadeIn 0.3s ease-out';
+                }
+            });
+        });
+        
+        // Gestione expand/collapse per abstract
+        const abstractContent = document.getElementById('abstract-content');
+        const abstractToggle = document.getElementById('abstract-toggle');
+        const abstractGradient = document.getElementById('abstract-gradient');
+        
+        if (abstractToggle) {
+            let isExpanded = false;
+            
+            abstractToggle.addEventListener('click', () => {
+                isExpanded = !isExpanded;
+                
+                if (isExpanded) {
+                    abstractContent.style.maxHeight = abstractContent.scrollHeight + 'px';
+                    abstractToggle.textContent = 'Show less ▲';
+                    abstractGradient.style.display = 'none';
+                } else {
+                    abstractContent.style.maxHeight = '150px';
+                    abstractToggle.textContent = 'Show more ▼';
+                    abstractGradient.style.display = 'block';
+                }
+            });
+            
+            // Verifica se l'abstract è abbastanza corto da mostrarlo tutto
+            if (abstractContent && abstractContent.scrollHeight <= 150) {
+                abstractToggle.style.display = 'none';
+                abstractGradient.style.display = 'none';
+                abstractContent.style.maxHeight = 'none';
+            }
+        }
+    </script>
+</body>
+</html>"""
+        
+        return html
 
 def system_health_check(config: Config) -> Dict[str, Any]:
     """Esegue un controllo di base dell'integrità del sistema."""
