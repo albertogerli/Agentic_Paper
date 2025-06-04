@@ -73,6 +73,7 @@ class Config:
     temperature_coordinator: float = 1
     temperature_editor: float = 1
     temperature_ai_origin: float = 1  # New temperature for AI Origin Detector
+    temperature_hallucination: float = 1
     
     @classmethod
     def from_yaml(cls, path: str) -> 'Config':
@@ -672,8 +673,8 @@ End your review with: "REVIEW COMPLETED - AI Origin Detector\"""",
         return Agent(
             name="Hallucination_Detector",
             instructions="""You are tasked with spotting potential hallucinations in the paper. Look for:\n1. Claims lacking citations\n2. Data inconsistent with official sources\n3. Conclusions not supported by presented data\n4. Invented or malformed references\nProvide a concise report IN ENGLISH detailing any suspicious statements.""",
-            model="gpt-4o-2024-05-13",
-            temperature=self.config.temperature_standard if hasattr(self.config, 'temperature_standard') else 1,
+            model=self.config.model_standard,
+            temperature=self.config.temperature_hallucination,
         )
     
     def create_coordinator_agent(self) -> Agent:
