@@ -1053,6 +1053,20 @@ class ReviewDashboard:
         html_parts.extend(["</body>", "</html>"])
         return "\n".join(html_parts)
 
+    """Genera un semplice dashboard HTML riassuntivo."""
+
+    def generate_html_dashboard(self, results: Dict[str, Any]) -> str:
+        html = ["<html><head><meta charset='utf-8'><title>Review Dashboard</title></head><body>"]
+        html.append(f"<h1>Review Results {results['timestamp']}</h1>")
+        html.append("<h2>Reviews</h2><ul>")
+        for name, review in results.get('reviews', {}).items():
+            html.append(f"<li>{name}: {len(review.split())} words</li>")
+        html.append("</ul>")
+        html.append(f"<h2>Editorial Decision</h2><p>{results.get('editor_decision','')}</p>")
+        html.append("</body></html>")
+        return "\n".join(html)
+
+
 
 def system_health_check(config: Config) -> Dict[str, Any]:
     """Esegue un controllo di base dell'integrità del sistema."""

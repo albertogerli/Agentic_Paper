@@ -34,6 +34,8 @@ Output includes:
 * Rich **Markdown report**, **executive summary**, and full **JSON** dump
   (all saved inside the chosen `output_dir`).
 * Styled HTML dashboard and health report
+* Lightweight HTML dashboard and health report
+
 
 ---
 
