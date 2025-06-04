@@ -986,7 +986,7 @@ class ReviewDashboard:
     """Genera un dashboard HTML strutturato e gradevole."""
 
     def generate_html_dashboard(self, results: Dict[str, Any]) -> str:
-        """Create a styled HTML page summarising the review results."""
+        """Create a styled HTML page summarising the review results using Tailwind CSS."""
         paper = results.get("paper_info", {})
         reviews = results.get("reviews", {})
         timestamp = results.get("timestamp", "")
@@ -1001,51 +1001,46 @@ class ReviewDashboard:
             "<head>",
             "<meta charset='utf-8'>",
             "<title>APRS Review Dashboard</title>",
-            "<style>",
-            "body{font-family:Arial,Helvetica,sans-serif;margin:40px;line-height:1.6;background:#f9f9f9;}",
-            "h1,h2{color:#2c3e50;}",
-            "section{margin-bottom:2em;padding:1em;background:#fff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.1);}",
-            "summary{font-weight:bold;cursor:pointer;}",
-            "pre{white-space:pre-wrap;background:#f3f3f3;padding:1em;border-radius:4px;overflow:auto;}",
-            "table{border-collapse:collapse;width:100%;margin-bottom:1em;}",
-            "th,td{border:1px solid #ddd;padding:8px;text-align:left;}",
-            "th{background:#f0f0f0;}",
-            "</style>",
+            "<link href='https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css' rel='stylesheet'>",
             "</head>",
-            "<body>",
-            f"<h1>Peer Review Results</h1>",
-            f"<p><strong>Generated:</strong> {esc(timestamp)}</p>",
-            "<section>",
-            "<h2>Paper Information</h2>",
-            "<ul>",
+            "<body class='bg-gray-100 p-8 font-sans'>",
+            f"<h1 class='text-3xl font-bold mb-4'>Peer Review Results</h1>",
+            f"<p class='text-sm mb-6'><strong>Generated:</strong> {esc(timestamp)}</p>",
+            "<section class='bg-white p-6 rounded-lg shadow mb-6'>",
+            "<h2 class='text-2xl font-semibold mb-2'>Paper Information</h2>",
+            "<ul class='list-disc ml-6'>",
             f"<li><strong>Title:</strong> {esc(paper.get('title',''))}</li>",
             f"<li><strong>Authors:</strong> {esc(paper.get('authors',''))}</li>",
             f"<li><strong>Length:</strong> {paper.get('length','')} characters</li>",
             "</ul>",
             "</section>",
-            "<section>",
-            "<h2>Editorial Decision</h2>",
+            "<section class='bg-white p-6 rounded-lg shadow mb-6'>",
+            "<h2 class='text-2xl font-semibold mb-2'>Editorial Decision</h2>",
             f"<p>{esc(editor_decision)}</p>",
             "</section>",
-            "<section>",
-            "<h2>Review Summary</h2>",
-            "<table>",
-            "<tr><th>Reviewer</th><th>Word Count</th></tr>",
+            "<section class='bg-white p-6 rounded-lg shadow mb-6'>",
+            "<h2 class='text-2xl font-semibold mb-2'>Review Summary</h2>",
+            "<table class='min-w-full table-auto mb-4'>",
+            "<thead><tr class='bg-gray-200'><th class='px-4 py-2 text-left'>Reviewer</th><th class='px-4 py-2 text-left'>Word Count</th></tr></thead>",
+            "<tbody>",
         ]
 
         for name, review in reviews.items():
-            html_parts.append(f"<tr><td>{esc(name)}</td><td>{len(review.split())}</td></tr>")
+            html_parts.append(
+                f"<tr><td class='border px-4 py-2'>{esc(name)}</td><td class='border px-4 py-2'>{len(review.split())}</td></tr>"
+            )
 
         html_parts.extend([
+            "</tbody>",
             "</table>",
             "</section>",
         ])
 
         for name, review in reviews.items():
             html_parts.extend([
-                "<section>",
-                f"<details class='collapsible'><summary>{esc(name.replace('_',' ').title())}</summary>",
-                f"<pre>{esc(review)}</pre>",
+                "<section class='bg-white p-6 rounded-lg shadow mb-6'>",
+                f"<details><summary class='font-semibold cursor-pointer'>{esc(name.replace('_',' ').title())}</summary>",
+                f"<pre class='whitespace-pre-wrap mt-2'>{esc(review)}</pre>",
                 "</details>",
                 "</section>",
             ])
