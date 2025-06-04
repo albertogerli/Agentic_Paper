@@ -20,16 +20,20 @@ APRS accepts both plain text and PDF manuscripts. When a `.pdf` is provided, the
 | **Contradiction Checker** | Inconsistencies & unsupported claims | `o3` |
 | **Ethics & Integrity Reviewer** | Research ethics, transparency | `gpt-4.1` |
 | **AI Origin Detector** | Likelihood text was AI-generated | `gpt-4.1` |
+| **Hallucination Detector** | Unsupported statements | `gpt-4o-2024-05-13` |
 | **Review Coordinator** | Synthesises all reviews | `o3` |
 | **Journal Editor** | Final editorial decision | `gpt-4.1` |
+
+Behind the scenes agents run concurrently using Python `asyncio`; results are cached to speed up repeated runs.
 
 Output includes:
 
 * Individual reviews (`review_<agent>.txt`)
 * Coordinator synthesis
 * Final editorial decision
-* Rich **Markdown report**, **executive summary**, and full **JSON** dump  
+* Rich **Markdown report**, **executive summary**, and full **JSON** dump
   (all saved inside the chosen `output_dir`).
+* Lightweight HTML dashboard and health report
 
 ---
 
@@ -83,6 +87,7 @@ output_reviews/
 ├── review_editor.txt
 ├── review_report_YYYYMMDD_HHMMSS.md
 ├── executive_summary_YYYYMMDD_HHMMSS.md
+├── dashboard_YYYYMMDD_HHMMSS.html
 └── review_results_YYYYMMDD_HHMMSS.json
 ```
 
@@ -102,7 +107,7 @@ output_reviews/
 ## Dependencies
 
 * Python 3.10+
-* `openai`, `tenacity`, `pyyaml`, `pdfplumber`
+* `openai`, `tenacity`, `pyyaml`, `pdfplumber`, `aiohttp`
 
 All pinned in **`requirements.txt`**.
 
@@ -113,7 +118,7 @@ All pinned in **`requirements.txt`**.
 * Relies on accurate plaintext extraction; complex PDFs may require manual cleanup.
 * Very large papers (> 25 000 chars) may hit context limits—split or summarise if needed.
 * “AI Origin Detector” is heuristic, not definitive.
-* Parallelism is thread-based; switching to `async`+`aiohttp` could reduce overhead.
+* Batch processing is supported but not fully optimized for very large numbers of agents.
 
 Contributions via pull request are welcome.
 
