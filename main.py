@@ -311,10 +311,85 @@ class FileManager:
 
 class PaperAnalyzer:
     """Analyze and extract information from the paper."""
-    
-    @staticmethod
-    def extract_info(paper_text: str) -> PaperInfo:
-        """Extract structured information from the paper."""
+
+    def __init__(self, config: Config):
+        self.config = config
+        self.client = OpenAI(api_key=config.api_key) if config.api_key else None
+
+    def extract_info(self, paper_text: str) -> PaperInfo:
+        """
+        Extract structured information from the paper.
+        It first tries to use an AI model for better accuracy and falls back
+        to a regex-based method if the AI fails.
+        """
+        info = {}
+        ai_success = False
+
+        if self.client:
+            try:
+                # Truncate text to avoid excessive token usage for metadata extraction
+                snippet = paper_text[:15000]
+                
+                prompt = f"""You are an expert assistant specializing in scientific literature. Your task is to extract the Title, Authors, and Abstract from the beginning of a scientific paper.
+
+The text of the paper is provided below. Please analyze it and return the extracted information in a valid JSON format with the following keys: "title", "authors", "abstract".
+
+- For "title", provide the full title of the paper.
+- For "authors", list all authors, separated by commas.
+- For "abstract", provide the full text of the abstract.
+
+If any piece of information cannot be found, use the value "Not Found".
+
+--- PAPER TEXT ---
+{snippet}
+--- END OF TEXT ---
+
+Return only the JSON object, without any additional comments or explanations."""
+                
+                response = self.client.chat.completions.create(
+                    model=self.config.model_basic,  # Use a fast model
+                    messages=[
+                        {"role": "system", "content": "You are an expert assistant for scientific literature analysis. Your output must be a single, valid JSON object."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.0,
+                    response_format={"type": "json_object"},
+                )
+                
+                extracted_text = response.choices[0].message.content
+                info = json.loads(extracted_text)
+                
+                # Basic validation of AI output
+                if info.get("title") and info.get("title") not in ["Not Found", "Unknown title"]:
+                    logger.info("Successfully extracted paper info using AI.")
+                    ai_success = True
+                else:
+                    logger.warning("AI extraction did not find a valid title. Falling back to regex.")
+
+            except Exception as e:
+                logger.error(f"AI-based info extraction failed: {e}. Falling back to regex.")
+        
+        if not ai_success:
+            logger.info("Using regex-based method to extract paper info.")
+            regex_info = self._extract_info_with_regex(paper_text)
+            # Merge results, giving preference to regex if AI failed or returned poor results
+            info["title"] = regex_info.get("title") if regex_info.get("title") != "Unknown title" else info.get("title", "Unknown title")
+            info["authors"] = regex_info.get("authors") if regex_info.get("authors") != "Unknown authors" else info.get("authors", "Unknown authors")
+            info["abstract"] = regex_info.get("abstract") if regex_info.get("abstract") != "Abstract not found" else info.get("abstract", "Abstract not found")
+
+        sections = self._identify_sections(paper_text)
+        
+        return PaperInfo(
+            title=info.get("title", "Unknown title"),
+            authors=info.get("authors", "Unknown authors"),
+            abstract=info.get("abstract", "Abstract not found"),
+            length=len(paper_text),
+            sections=sections,
+            file_path=None 
+        )
+
+    def _extract_info_with_regex(self, paper_text: str) -> Dict[str, str]:
+        """Extract structured information from the paper using regex."""
         # Extract title
         lines = paper_text.split('\n')
         title = next((line.strip() for line in lines if line.strip()), "Unknown title")
@@ -338,17 +413,12 @@ class PaperAnalyzer:
         abstract_match = re.search(abstract_pattern, paper_text, re.IGNORECASE | re.DOTALL)
         abstract = abstract_match.group(1).strip() if abstract_match else "Abstract not found"
         
-        # Identify sections
-        sections = PaperAnalyzer._identify_sections(paper_text)
-        
-        return PaperInfo(
-            title=title,
-            authors=authors,
-            abstract=abstract,
-            length=len(paper_text),
-            sections=sections
-        )
-    
+        return {
+            "title": title,
+            "authors": authors,
+            "abstract": abstract
+        }
+
     @staticmethod
     def _identify_sections(paper_text: str) -> List[str]:
         """Identify the main sections of the paper using an improved approach."""
@@ -479,10 +549,48 @@ class PaperAnalyzer:
 class AgentFactory:
     """Factory per creare agenti con configurazioni appropriate."""
     
-    def __init__(self, config: Config):
-        self.config = config
-        self.file_manager = FileManager(config.output_dir)
+    # Base complexity score for each agent's task.
+    # Scale: 0.0 (simple) to 1.0 (complex).
+    AGENT_BASE_COMPLEXITY = {
+        "methodology": 0.9,
+        "results": 0.7,
+        "literature": 0.6,
+        "structure": 0.3,
+        "impact": 0.7,
+        "contradiction": 0.9,
+        "ethics": 0.5,
+        "ai_origin": 0.4,
+        "hallucination": 0.6,
+        "coordinator": 1.0, # Always high, synthesizes all reviews
+        "editor": 0.8,
+        "author_editor_summary": 0.8
+    }
     
+    def __init__(self, config: Config, paper_complexity_score: float):
+        self.config = config
+        self.paper_complexity_score = paper_complexity_score
+        self.file_manager = FileManager(config.output_dir)
+
+    def _determine_model_for_agent(self, agent_name: str) -> str:
+        """
+        Determines the best model for an agent based on task and paper complexity.
+        """
+        base_task_complexity = self.AGENT_BASE_COMPLEXITY.get(agent_name, 0.5)
+        
+        # Combine paper complexity and task complexity.
+        # Weighting: 60% paper complexity, 40% task complexity.
+        final_score = (self.paper_complexity_score * 0.6) + (base_task_complexity * 0.4)
+
+        if final_score >= 0.75:
+            model = self.config.model_powerful
+        elif final_score >= 0.5:
+            model = self.config.model_standard
+        else:
+            model = self.config.model_basic
+            
+        logger.info(f"Selected model '{model}' for agent '{agent_name}' (score: {final_score:.2f})")
+        return model
+
     def create_methodology_agent(self) -> Agent:
         return Agent(
             name="Methodology_Expert",
@@ -508,7 +616,7 @@ Structure your review with clear sections:
 - Specific Recommendations
 
 End your review with: "REVIEW COMPLETED - Methodology Expert" """,
-            model=self.config.model_powerful,
+            model=self._determine_model_for_agent("methodology"),
             temperature=self.config.temperature_methodology,
         )
     
@@ -537,7 +645,7 @@ Structure your review with:
 - Recommendations for Improvement
 
 End your review with: "REVIEW COMPLETED - Results Analyst" """,
-            model=self.config.model_powerful,
+            model=self._determine_model_for_agent("results"),
             temperature=self.config.temperature_results,
         )
     
@@ -557,7 +665,7 @@ Provide a balanced assessment IN ENGLISH of the paper's positioning in the resea
 suggesting additions or changes in contextualization and bibliographic references.
 
 End your review with: "REVIEW COMPLETED - Literature Expert" """,
-            model=self.config.model_standard,
+            model=self._determine_model_for_agent("literature"),
             temperature=self.config.temperature_literature,
         )
     
@@ -579,7 +687,7 @@ Provide concrete suggestions IN ENGLISH for improving the organization and expos
 indicating specific sections to restructure, condense, or expand.
 
 End your review with: "REVIEW COMPLETED - Structure & Clarity Reviewer" """,
-            model=self.config.model_basic,
+            model=self._determine_model_for_agent("structure"),
             temperature=self.config.temperature_structure,
         )
     
@@ -600,7 +708,7 @@ Offer a balanced assessment IN ENGLISH of the work's importance in the current s
 considering both strengths and limitations in terms of potential impact.
 
 End your review with: "REVIEW COMPLETED - Impact & Innovation Analyst" """,
-            model=self.config.model_standard,
+            model=self._determine_model_for_agent("impact"),
             temperature=self.config.temperature_impact,
         )
     
@@ -624,7 +732,7 @@ citing specific sections or passages of the paper.
 If you find no contradictions or significant inconsistencies, please state "No significant contradictions or inconsistencies were found after a careful review."
 
 End your review with: "REVIEW COMPLETED - Contradiction Checker" """,
-            model=self.config.model_powerful,
+            model=self._determine_model_for_agent("contradiction"),
             temperature=self.config.temperature_contradiction,
         )
     
@@ -646,7 +754,7 @@ Provide a balanced assessment IN ENGLISH of ethical and integrity aspects, highl
 positive practices and problematic areas, with suggestions for improvements.
 
 End your review with: "REVIEW COMPLETED - Ethics & Integrity Reviewer" """,
-            model=self.config.model_standard,
+            model=self._determine_model_for_agent("ethics"),
             temperature=self.config.temperature_ethics,
         )
     
@@ -665,7 +773,7 @@ Provide a detailed analysis IN ENGLISH, outlining your findings and the reasons 
 Conclude with an estimated likelihood (e.g., Very Low, Low, Moderate, High, Very High) that the text has significant AI-generated portions.
 
 End your review with: "REVIEW COMPLETED - AI Origin Detector\"""",
-            model=self.config.model_standard,  # or model_powerful depending on the need
+            model=self._determine_model_for_agent("ai_origin"),
             temperature=self.config.temperature_ai_origin,
         )
 
@@ -673,7 +781,7 @@ End your review with: "REVIEW COMPLETED - AI Origin Detector\"""",
         return Agent(
             name="Hallucination_Detector",
             instructions="""You are tasked with spotting potential hallucinations in the paper. Look for:\n1. Claims lacking citations\n2. Data inconsistent with official sources\n3. Conclusions not supported by presented data\n4. Invented or malformed references\nProvide a concise report IN ENGLISH detailing any suspicious statements.""",
-            model=self.config.model_standard,
+            model=self._determine_model_for_agent("hallucination"),
             temperature=self.config.temperature_hallucination,
         )
     
@@ -704,7 +812,7 @@ Your final assessment should include:
 - Final recommendation with clear justification
 
 End with: "COORDINATOR ASSESSMENT COMPLETED" """,
-            model=self.config.model_powerful,
+            model=self._determine_model_for_agent("coordinator"),
             temperature=self.config.temperature_coordinator,
         )
     
@@ -730,8 +838,33 @@ Your decision should be one of:
 Include clear justification for your decision and specific guidance for authors.
 
 End with: "EDITORIAL DECISION COMPLETED" """,
-            model=self.config.model_standard,
+            model=self._determine_model_for_agent("editor"),
             temperature=self.config.temperature_editor,
+        )
+    
+    def create_author_editor_summary_agent(self) -> Agent:
+        return Agent(
+            name="Author_Editor_Summary_Agent",
+            instructions="""You are a senior scientific reviewer and editorial consultant. Your task is to synthesize all the reviews and the coordinator's assessment of a scientific paper into two distinct sections:
+
+1. **Review for Author and Editor**: Write a discursive, technical, and human summary of the most important points, strengths, and weaknesses that emerged from the reviews. Use a constructive, professional, and clear tone, highlighting the main issues and suggestions for improvement. This section should be suitable for both the authors and the editor.
+
+2. **Review for Editor Only**: Write a confidential summary for the editor, focusing on critical points, structural weaknesses, ethical or originality concerns, and any aspect that requires special editorial attention. Use a technical, discursive, and human language, providing a clear and reasoned overview of the most relevant editorial issues.
+
+Base your synthesis on the content of all reviews and the coordinator's assessment. Structure your output as follows:
+
+---
+Review for Author and Editor:
+[Your summary here]
+---
+Review for Editor Only:
+[Your summary here]
+---
+
+End with: "SUMMARY AGENT COMPLETED".
+""",
+            model=self._determine_model_for_agent("author_editor_summary"),
+            temperature=1.0,
         )
     
     def create_all_agents(self) -> Dict[str, Agent]:
@@ -747,7 +880,8 @@ End with: "EDITORIAL DECISION COMPLETED" """,
             "ai_origin": self.create_ai_origin_detector_agent(),
             "hallucination": self.create_hallucination_detector(),
             "coordinator": self.create_coordinator_agent(),
-            "editor": self.create_editor_agent()
+            "editor": self.create_editor_agent(),
+            "author_editor_summary": self.create_author_editor_summary_agent(),
         }
 
 class ReviewOrchestrator:
@@ -756,20 +890,78 @@ class ReviewOrchestrator:
     def __init__(self, config: Config):
         self.config = config
         self.file_manager = FileManager(config.output_dir)
-        self.agent_factory = AgentFactory(config)
-        self.agents = {}
-    
+        self.paper_analyzer = PaperAnalyzer(config)
+        self.agent_factory: Optional[AgentFactory] = None
+        self.agents: Dict[str, Agent] = {}
+        self.client = AsyncOpenAI(api_key=config.api_key) if config.api_key else None
+
+    async def _assess_paper_complexity(self, paper_text: str) -> float:
+        """
+        Rates task complexity on a scale of 0.0 to 1.0 using an AI model.
+        """
+        if not self.client:
+            logger.warning("No OpenAI client, using default complexity.")
+            return 0.5
+
+        try:
+            # Using a snippet to be efficient
+            snippet = paper_text[:8000]
+
+            prompt = f"""You are a scientific review expert. Your task is to assess the complexity of the provided scientific paper snippet.
+            Consider factors like:
+            - Technical jargon and lexical density
+            - Conceptual depth and abstraction
+            - Methodological sophistication
+            - Interdisciplinarity
+
+            Based on your assessment, provide a single complexity score from 0.0 (very simple, e.g., a high school report) to 1.0 (extremely complex, e.g., a groundbreaking theoretical physics paper).
+
+            Return your answer as a single JSON object with one key: "complexity_score".
+
+            --- PAPER SNIPPET ---
+            {snippet}
+            --- END OF SNIPPET ---
+            """
+            
+            response = await self.client.chat.completions.create(
+                model="gpt-4.1-mini", # Always use the fast model for this assessment
+                messages=[
+                    {"role": "system", "content": "You are a scientific complexity analyzer. Your output must be a single, valid JSON object."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.0,
+                response_format={"type": "json_object"},
+            )
+            
+            result = json.loads(response.choices[0].message.content)
+            score = float(result.get("complexity_score", 0.5))
+            
+            if 0.0 <= score <= 1.0:
+                logger.info(f"Assessed paper complexity score: {score:.2f}")
+                return score
+            else:
+                logger.warning(f"Invalid complexity score received: {score}. Using default 0.5.")
+                return 0.5
+
+        except Exception as e:
+            logger.error(f"Failed to assess paper complexity: {e}. Using default 0.5.")
+            return 0.5
+
     def execute_review_process(self, paper_text: str) -> Dict[str, Any]:
         """Execute the full review process with error handling."""
         try:
+            # Assess complexity to inform agent creation
+            complexity_score = asyncio.run(self._assess_paper_complexity(paper_text))
+            
+            # Now that models are selected, create the factory and agents
+            self.agent_factory = AgentFactory(self.config, complexity_score)
+            self.agents = self.agent_factory.create_all_agents()
+
             # Extract paper information
-            paper_info = PaperAnalyzer.extract_info(paper_text)
+            paper_info = self.paper_analyzer.extract_info(paper_text)
             self.file_manager.save_json(paper_info.to_dict(), "paper_info.json")
             
             logger.info("Starting multi-agent peer review process...")
-            
-            # Create agents
-            self.agents = self.agent_factory.create_all_agents()
             
             # Prepare initial message
             initial_message = self._prepare_initial_message(paper_info, paper_text)
@@ -780,6 +972,10 @@ class ReviewOrchestrator:
             # Run coordinator
             coordinator_review = self._execute_coordinator(reviews)
             reviews["coordinator"] = coordinator_review
+
+            # Run author/editor summary agent
+            author_editor_summary = self._execute_author_editor_summary(reviews)
+            reviews["author_editor_summary"] = author_editor_summary
             
             # Run editor
             editor_decision = self._execute_editor(reviews)
@@ -914,6 +1110,32 @@ Please provide your comprehensive coordinator assessment based on all these revi
             logger.error(f"Error in coordinator: {e}")
             return f"Error in coordinator assessment: {str(e)}"
     
+    def _execute_author_editor_summary(self, reviews: Dict[str, str]) -> str:
+        """Esegue l'agente di sintesi per autore/editor."""
+        summary_agent = self.agents.get("author_editor_summary")
+        if not summary_agent:
+            logger.error("Author/Editor Summary agent not found")
+            return "Author/Editor summary not available"
+        # Prepara il messaggio con tutte le review e il coordinatore
+        reviews_text = "\n\n".join([
+            f"=== {agent_name.upper()} REVIEW ===\n{review_content}"
+            for agent_name, review_content in reviews.items()
+        ])
+        summary_message = f"""
+Here are all the expert reviews and the coordinator's assessment for the paper:
+
+{reviews_text}
+
+Please provide the two requested summaries as per your instructions.
+"""
+        try:
+            summary = summary_agent.run(summary_message)
+            self.file_manager.save_review("author_editor_summary", summary)
+            return summary
+        except Exception as e:
+            logger.error(f"Error in author/editor summary agent: {e}")
+            return f"Error in author/editor summary: {str(e)}"
+    
     def _execute_editor(self, all_reviews: Dict[str, str]) -> str:
         """Run the editor to produce the final decision."""
         editor = self.agents.get("editor")
@@ -1018,10 +1240,13 @@ Please provide your editorial decision based on all these reviews.
 
 {reviews.get('coordinator', 'No coordinator assessment available')}
 
+## Author & Editor Summary
+
+{reviews.get('author_editor_summary', 'No summary available')}
+
 ## Detailed Reviews
 
 """
-        
         # Aggiungi revisioni individuali
         review_order = [
             "methodology",
@@ -1034,13 +1259,11 @@ Please provide your editorial decision based on all these reviews.
             "ai_origin",
             "hallucination",
         ]
-        
         for agent_type in review_order:
             if agent_type in reviews:
                 report += f"### {agent_type.replace('_', ' ').title()} Review\n\n"
                 report += reviews[agent_type]
                 report += "\n\n---\n\n"
-        
         return report
     
     def _generate_executive_summary(self, results: Dict[str, Any]) -> str:
@@ -1048,7 +1271,7 @@ Please provide your editorial decision based on all these reviews.
         paper_info = results["paper_info"]
         editor_decision = results["editor_decision"]
         coordinator_assessment = results["reviews"].get("coordinator", "")
-        
+        author_editor_summary = results["reviews"].get("author_editor_summary", "")
         summary = f"""# Executive Summary
 
 **Paper:** {paper_info['title']}
@@ -1062,6 +1285,10 @@ Please provide your editorial decision based on all these reviews.
 ## Coordinator's Overall Assessment
 
 {coordinator_assessment}
+
+## Author & Editor Summary
+
+{author_editor_summary}
 
 ## Review Summary
 
@@ -1082,7 +1309,6 @@ The reviews were synthesized by a Review Coordinator and evaluated by a Journal 
 
 For the complete detailed reviews, please refer to the full report.
 """
-        
         return summary
 
 
@@ -1256,7 +1482,24 @@ class ReviewDashboard:
                 <div class="text-gray-600 mt-2">Avg Words/Review</div>
             </div>
         </div>
-        
+        """
+        # Sezione sintesi Author & Editor Summary
+        author_editor_summary = reviews.get("author_editor_summary", "")
+        if author_editor_summary:
+            html += f'''
+    <!-- Author & Editor Summary -->
+    <div class="bg-white rounded-lg shadow-lg p-8 mb-8 fade-in" style="animation-delay: 0.45s;">
+        <h2 class="text-2xl font-semibold mb-6 flex items-center">
+            <span class="bg-yellow-100 text-yellow-600 p-2 rounded-lg mr-3">📝</span>
+            Author & Editor Summary
+        </h2>
+        <div class="bg-yellow-50 border-l-4 border-yellow-300 rounded-lg p-6">
+            <pre class="whitespace-pre-wrap text-base leading-relaxed text-gray-800">{esc(author_editor_summary)}</pre>
+        </div>
+    </div>
+'''
+        # Individual Reviews
+        html += '''
         <!-- Individual Reviews -->
         <div class="bg-white rounded-lg shadow-lg p-8 fade-in" style="animation-delay: 0.5s;">
             <h2 class="text-2xl font-semibold mb-6 flex items-center">
@@ -1264,7 +1507,7 @@ class ReviewDashboard:
                 Expert Reviews
             </h2>
             <div class="space-y-4">
-"""
+'''
         
         # Mappa per icone e colori dei revisori
         reviewer_styles = {
@@ -1317,7 +1560,6 @@ class ReviewDashboard:
 """
         
         html += """
-                </div>
             </div>
         </div>
     </div>
@@ -1344,6 +1586,8 @@ class ReviewDashboard:
                 }
             });
         }, observerOptions);
+        
+        document.querySelectorAll('.fade-in').forEach(el => observer.observe(el));
         
         // Toggle animation for details
         document.querySelectorAll('details').forEach(detail => {
@@ -1425,8 +1669,13 @@ def main():
     try:
         # Load configuration
         config = Config.from_yaml(args.config)
+        # Se l'utente non specifica --output-dir, crea una directory unica con timestamp
         if args.output_dir:
             config.output_dir = args.output_dir
+        else:
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            config.output_dir = f"output_revisione_paper_{timestamp}"
         
         # Validate configuration
         config.validate()
