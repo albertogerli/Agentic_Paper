@@ -1,0 +1,18 @@
+api_key: "" # Placeholder, should be set via ENV or here
+model_powerful: "o3"
+model_standard: "gpt-4.1"
+model_basic: "gpt-4.1-mini"
+output_dir: "output_revisione_paper" # This will be dynamically set in R if not overridden
+max_parallel_agents: 3
+agent_timeout: 300
+temperature_methodology: 1.0
+temperature_results: 1.0
+temperature_literature: 1.0
+temperature_structure: 1.0
+temperature_impact: 1.0
+temperature_contradiction: 1.0
+temperature_ethics: 1.0
+temperature_coordinator: 1.0
+temperature_editor: 1.0
+temperature_ai_origin: 1.0
+temperature_hallucination: 1.0
