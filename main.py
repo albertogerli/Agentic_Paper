@@ -1,8 +1,7 @@
 """
-Multi-Agent System for Scientific Paper Review.
-Alternative version without relying on the ``agents`` framework.
-
-This system uses the OpenAI APIs directly instead of ``agents``.
+Multi-Agent System for Scientific Paper Review - IMPROVED VERSION
+Optimized for GPT-5 with prompt caching and appropriate configurations.
+Advanced peer review system using specialized AI agents for comprehensive manuscript evaluation.
 """
 
 import os
@@ -20,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from abc import ABC, abstractmethod
 import yaml
 from openai import OpenAI, AsyncOpenAI
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from functools import lru_cache
 import aiohttp
 import pdfplumber
@@ -30,6 +29,10 @@ def setup_logging(log_level: str = "INFO") -> logging.Logger:
     """Configure the logging system."""
     logger = logging.getLogger("paper_review_system")
     logger.setLevel(getattr(logging, log_level.upper()))
+    
+    # Avoid duplicates
+    if logger.handlers:
+        logger.handlers.clear()
     
     # Console handler
     console_handler = logging.StreamHandler()
@@ -57,23 +60,31 @@ logger = setup_logging()
 class Config:
     """Centralized configuration for the system."""
     api_key: str = field(default_factory=lambda: os.environ.get("OPENAI_API_KEY", ""))
-    model_powerful: str = "o3"
-    model_standard: str = "gpt-4.1"
-    model_basic: str = "gpt-4.1-mini"
-    output_dir: str = "output_revisione_paper"
-    max_parallel_agents: int = 3
-    agent_timeout: int = 300  # seconds
-    temperature_methodology: float = 1
-    temperature_results: float = 1
-    temperature_literature: float = 1
-    temperature_structure: float = 1
-    temperature_impact: float = 1
-    temperature_contradiction: float = 1
-    temperature_ethics: float = 1
-    temperature_coordinator: float = 1
-    temperature_editor: float = 1
-    temperature_ai_origin: float = 1  # New temperature for AI Origin Detector
-    temperature_hallucination: float = 1
+    model_powerful: str = "gpt-5"
+    model_standard: str = "gpt-5-mini"
+    model_basic: str = "gpt-5-nano"
+    output_dir: str = "output_paper_review"
+    max_parallel_agents: int = 6  # Increased for GPT-5 capabilities
+    agent_timeout: int = 600  # Extended timeout for complex reasoning
+    
+    # Temperature settings for GPT-5 (only 1.0 is supported)
+    temperature_methodology: float = 1.0  # GPT-5 only supports 1.0
+    temperature_results: float = 1.0      # GPT-5 only supports 1.0
+    temperature_literature: float = 1.0   # GPT-5 only supports 1.0
+    temperature_structure: float = 1.0    # GPT-5 only supports 1.0
+    temperature_impact: float = 1.0       # GPT-5 only supports 1.0
+    temperature_contradiction: float = 1.0  # GPT-5 only supports 1.0
+    temperature_ethics: float = 1.0       # GPT-5 only supports 1.0
+    temperature_coordinator: float = 1.0  # GPT-5 only supports 1.0
+    temperature_editor: float = 1.0       # GPT-5 only supports 1.0
+    temperature_ai_origin: float = 1.0    # GPT-5 only supports 1.0
+    temperature_hallucination: float = 1.0  # GPT-5 only supports 1.0
+    
+    # Max output tokens (GPT-5 supports up to 128K)
+    max_output_tokens: int = 16000  # Sufficient for detailed reviews
+    
+    # Enable prompt caching (saves up to 87.5% on costs)
+    use_prompt_caching: bool = True
     
     @classmethod
     def from_yaml(cls, path: str) -> 'Config':
@@ -99,11 +110,15 @@ class Config:
 class Agent:
     """Simplified implementation of an agent using the OpenAI API."""
     
-    def __init__(self, name: str, instructions: str, model: str, temperature: float = 0.7):
+    def __init__(self, name: str, instructions: str, model: str, 
+                 temperature: float = 1.0,
+                 max_output_tokens: int = 16000, use_caching: bool = True):
         self.name = name
         self.instructions = instructions
         self.model = model
         self.temperature = temperature
+        self.max_output_tokens = max_output_tokens
+        self.use_caching = use_caching
         self.client = None
         self._init_client()
     
@@ -115,34 +130,56 @@ class Agent:
         else:
             logger.warning("OpenAI client not initialized - no API key")
   
-    
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=60))
+    @retry(
+        stop=stop_after_attempt(3), 
+        wait=wait_exponential(multiplier=2, min=4, max=120),
+        retry=retry_if_exception_type((Exception,))
+    )
     def run(self, message: str) -> str:
         """Run the agent with the given message."""
         if not self.client:
             raise ValueError("OpenAI client not initialized")
         
-        # Verify that the message is not empty
+            # Verify that the message is not empty
         if not message or not message.strip():
             raise ValueError("Message content cannot be empty")
         
         try:
-            # Some models (o1-preview, o1-mini) only support temperature=1
-            temperature = self.temperature if self.model not in ["o1-preview", "o1-mini"] else 1
+            # Prepare messages with prompt caching if enabled
+            messages = [
+                {"role": "system", "content": self.instructions}
+            ]
             
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": self.instructions},
-                    {"role": "user", "content": message}
-                ],
-                temperature=temperature,
-
-                max_completion_tokens=4000
-            )
+            # For GPT-5, include cache_control for efficient token reuse
+            if self.use_caching and self.model.startswith("gpt-5"):
+                messages.append({
+                    "role": "user", 
+                    "content": message,
+                    "cache_control": {"type": "ephemeral"}  # Enable caching for this message
+                })
+            else:
+                messages.append({"role": "user", "content": message})
+            
+            # Base parameters for API call
+            params = {
+                "model": self.model,
+                "messages": messages,
+                "temperature": self.temperature,
+                "max_completion_tokens": self.max_output_tokens
+            }
+            
+            response = self.client.chat.completions.create(**params)
             
             result = response.choices[0].message.content
-            logger.info(f"Agent {self.name} completed successfully")
+            
+            # Log usage for cost monitoring
+            usage = response.usage
+            if hasattr(usage, 'cached_tokens'):
+                logger.info(f"Agent {self.name} completed - Tokens: {usage.total_tokens} "
+                          f"(cached: {getattr(usage, 'cached_tokens', 0)})")
+            else:
+                logger.info(f"Agent {self.name} completed - Tokens: {usage.total_tokens}")
+            
             return result
         
         except Exception as e:
@@ -151,26 +188,55 @@ class Agent:
 
 
 class AsyncAgent(Agent):
-    """Asynchronous version of the agent."""
+    """Asynchronous version of the agent with improved error handling."""
 
     async def arun(self, message: str) -> str:
         if not message or not message.strip():
             raise ValueError("Message content cannot be empty")
 
         client = AsyncOpenAI(api_key=Config().api_key)
-        temperature = self.temperature if self.model not in ["o1-preview", "o1-mini"] else 1
-        response = await client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": self.instructions},
-                {"role": "user", "content": message}
-            ],
-            temperature=temperature,
-            max_completion_tokens=4000,
-        )
-        result = response.choices[0].message.content
-        logger.info(f"Async agent {self.name} completed successfully")
-        return result
+        
+        try:
+            # Prepare messages with prompt caching
+            messages = [
+                {"role": "system", "content": self.instructions}
+            ]
+            
+            if self.use_caching and self.model.startswith("gpt-5"):
+                messages.append({
+                    "role": "user", 
+                    "content": message,
+                    "cache_control": {"type": "ephemeral"}
+                })
+            else:
+                messages.append({"role": "user", "content": message})
+            
+            params = {
+                "model": self.model,
+                "messages": messages,
+                "temperature": self.temperature,
+                "max_completion_tokens": self.max_output_tokens
+            }
+            
+            response = await client.chat.completions.create(**params)
+            
+            result = response.choices[0].message.content
+            
+            # Log usage
+            usage = response.usage
+            if hasattr(usage, 'cached_tokens'):
+                logger.info(f"Async agent {self.name} completed - Tokens: {usage.total_tokens} "
+                          f"(cached: {getattr(usage, 'cached_tokens', 0)})")
+            else:
+                logger.info(f"Async agent {self.name} completed - Tokens: {usage.total_tokens}")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in async agent {self.name}: {e}")
+            raise
+        finally:
+            await client.close()
 
 
 class CachingAsyncAgent(AsyncAgent):
@@ -183,6 +249,7 @@ class CachingAsyncAgent(AsyncAgent):
     async def arun(self, message: str) -> str:
         key = hash(message)
         if key in self._cache:
+            logger.info(f"Using cached result for agent {self.name}")
             return self._cache[key]
         result = await super().arun(message)
         self._cache[key] = result
@@ -214,7 +281,7 @@ class FileManager:
     
     def __init__(self, output_dir: str):
         self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(exist_ok=True)
+        self.output_dir.mkdir(exist_ok=True, parents=True)
     
     def save_json(self, data: Any, filename: str) -> bool:
         """Save data in JSON format with error handling."""
@@ -319,15 +386,13 @@ class PaperAnalyzer:
     def extract_info(self, paper_text: str) -> PaperInfo:
         """
         Extract structured information from the paper.
-        It first tries to use an AI model for better accuracy and falls back
-        to a regex-based method if the AI fails.
         """
         info = {}
         ai_success = False
 
         if self.client:
             try:
-                # Truncate text to avoid excessive token usage for metadata extraction
+                # Truncate text to avoid excessive token usage
                 snippet = paper_text[:15000]
                 
                 prompt = f"""You are an expert assistant specializing in scientific literature. Your task is to extract the Title, Authors, and Abstract from the beginning of a scientific paper.
@@ -347,19 +412,19 @@ If any piece of information cannot be found, use the value "Not Found".
 Return only the JSON object, without any additional comments or explanations."""
                 
                 response = self.client.chat.completions.create(
-                    model=self.config.model_basic,  # Use a fast model
+                    model=self.config.model_basic,
                     messages=[
                         {"role": "system", "content": "You are an expert assistant for scientific literature analysis. Your output must be a single, valid JSON object."},
                         {"role": "user", "content": prompt}
                     ],
-                    temperature=0.0,
+                    temperature=1.0,  # GPT-5 supporta solo 1.0
                     response_format={"type": "json_object"},
+                    max_completion_tokens=2000
                 )
                 
                 extracted_text = response.choices[0].message.content
                 info = json.loads(extracted_text)
                 
-                # Basic validation of AI output
                 if info.get("title") and info.get("title") not in ["Not Found", "Unknown title"]:
                     logger.info("Successfully extracted paper info using AI.")
                     ai_success = True
@@ -372,10 +437,9 @@ Return only the JSON object, without any additional comments or explanations."""
         if not ai_success:
             logger.info("Using regex-based method to extract paper info.")
             regex_info = self._extract_info_with_regex(paper_text)
-            # Merge results, giving preference to regex if AI failed or returned poor results
-            info["title"] = regex_info.get("title") if regex_info.get("title") != "Unknown title" else info.get("title", "Unknown title")
-            info["authors"] = regex_info.get("authors") if regex_info.get("authors") != "Unknown authors" else info.get("authors", "Unknown authors")
-            info["abstract"] = regex_info.get("abstract") if regex_info.get("abstract") != "Abstract not found" else info.get("abstract", "Abstract not found")
+            info["title"] = regex_info.get("title", "Unknown title")
+            info["authors"] = regex_info.get("authors", "Unknown authors")
+            info["abstract"] = regex_info.get("abstract", "Abstract not found")
 
         sections = self._identify_sections(paper_text)
         
@@ -390,11 +454,9 @@ Return only the JSON object, without any additional comments or explanations."""
 
     def _extract_info_with_regex(self, paper_text: str) -> Dict[str, str]:
         """Extract structured information from the paper using regex."""
-        # Extract title
         lines = paper_text.split('\n')
         title = next((line.strip() for line in lines if line.strip()), "Unknown title")
         
-        # Search for authors with an improved pattern
         author_patterns = [
             r'(?:Authors?|by|Autori|di):\s*([^\n]+)',
             r'^\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+(?:,\s*[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)*)',
@@ -408,7 +470,6 @@ Return only the JSON object, without any additional comments or explanations."""
                 authors = match.group(1).strip()
                 break
         
-        # Search for the abstract with an improved pattern
         abstract_pattern = r'(?:Abstract|Summary|Riassunto|Sommario)[:.\n]\s*([^\n]+(?:\n[^\n]+)*?)(?:\n\n|\n[A-Z]|\n\d+\.|$)'
         abstract_match = re.search(abstract_pattern, paper_text, re.IGNORECASE | re.DOTALL)
         abstract = abstract_match.group(1).strip() if abstract_match else "Abstract not found"
@@ -421,9 +482,7 @@ Return only the JSON object, without any additional comments or explanations."""
 
     @staticmethod
     def _identify_sections(paper_text: str) -> List[str]:
-        """Identify the main sections of the paper using an improved approach."""
-        
-        # Common standard sections in scientific papers
+        """Identify the main sections of the paper."""
         standard_sections = [
             "Abstract", "Introduction", "Background", "Related Work", "Literature Review",
             "Methods", "Methodology", "Materials and Methods", "Experimental Setup",
@@ -436,24 +495,17 @@ Return only the JSON object, without any additional comments or explanations."""
         sections_found = []
         lines = paper_text.split('\n')
         
-        # Patterns to identify sections
         section_patterns = [
-            # Numbered sections (1. Introduction, 2.1 Methods, etc.)
             (r'^(?P<num>\d+(?:\.\d+)*)\s*\.?\s+(?P<title>[A-Z][A-Za-z\s\-:]+)$', True),
-            # Sections with Roman numerals (I. Introduction, II. Methods)
             (r'^(?P<num>[IVX]+(?:\.[IVX]+)*)\s*\.?\s+(?P<title>[A-Z][A-Za-z\s\-:]+)$', True),
-            # Unnumbered sections in all caps (INTRODUCTION, METHODS)
             (r'^(?P<title>[A-Z][A-Z\s\-]{2,})$', False),
-            # Standard sections with or without numbering
             (r'^(?:\d+\.?\s+)?(?P<title>(?:' + '|'.join(standard_sections) + r'))\s*:?\s*$', False),
-            # Sections using markdown headers
             (r'^#+\s+(?P<title>.+)$', False),
         ]
         
-        # Analyze line by line
         for i, line in enumerate(lines):
             line = line.strip()
-            if not line or len(line) > 100:  # Skip empty or very long lines
+            if not line or len(line) > 100:
                 continue
                 
             for pattern, has_num in section_patterns:
@@ -461,56 +513,43 @@ Return only the JSON object, without any additional comments or explanations."""
                 if match:
                     title = match.group('title').strip()
                     
-                    # Filter titles that are too short or too long
                     if 2 < len(title) < 50:
-                        # Check that it is not regular text by inspecting nearby lines
                         prev_line = lines[i-1].strip() if i > 0 else ""
                         next_line = lines[i+1].strip() if i < len(lines)-1 else ""
                         
-                        # If the previous line is empty or the next one seems to start a new paragraph
                         if (not prev_line or len(prev_line) < 10 or 
                             (next_line and (next_line[0].isupper() or not next_line[0].isalpha()))):
                             
-                            # Normalize the title
                             if has_num and match.group('num'):
                                 section_title = f"{match.group('num')}. {title.title()}"
                             else:
                                 section_title = title.title()
                             
-                            # Avoid duplicates
                             if section_title not in sections_found:
                                 sections_found.append(section_title)
                     break
         
-        # If no sections were found, try a heuristic approach
         if len(sections_found) < 3:
             sections_found = PaperAnalyzer._identify_sections_heuristic(paper_text, standard_sections)
         
-        # Limit to 20 sections and remove very similar ones
         sections_found = PaperAnalyzer._filter_similar_sections(sections_found)[:20]
         
         return sections_found
 
     @staticmethod
     def _identify_sections_heuristic(paper_text: str, standard_sections: List[str]) -> List[str]:
-        """Heuristic approach to identify sections when pattern matching fails."""
+        """Heuristic approach to identify sections."""
         sections_found = []
         text_lower = paper_text.lower()
         
-        # Look for the standard sections in the text
         for section in standard_sections:
             section_lower = section.lower()
-            
-            # Look for variants of the section
             patterns = [
                 f"\n{section_lower}\n",
                 f"\n{section_lower}:",
                 f"\n{section_lower}.",
                 f"\n1. {section_lower}",
                 f"\n2. {section_lower}",
-                f"\n3. {section_lower}",
-                f"\n4. {section_lower}",
-                f"\n5. {section_lower}",
             ]
             
             for pattern in patterns:
@@ -526,15 +565,12 @@ Return only the JSON object, without any additional comments or explanations."""
         filtered = []
         
         for section in sections:
-            # Normalize for comparison
             section_normalized = re.sub(r'^(?:\d+\.?\d*)\s*', '', section).lower()
             
-            # Verify that it is not too similar to sections already added
             is_duplicate = False
             for existing in filtered:
                 existing_normalized = re.sub(r'^(?:\d+\.?\d*)\s*', '', existing).lower()
                 
-                # Check similarity
                 if (section_normalized == existing_normalized or
                     section_normalized in existing_normalized or
                     existing_normalized in section_normalized):
@@ -547,23 +583,22 @@ Return only the JSON object, without any additional comments or explanations."""
         return filtered
 
 class AgentFactory:
-    """Factory per creare agenti con configurazioni appropriate."""
+    """Factory for creating agents with appropriate configurations."""
     
-    # Base complexity score for each agent's task.
-    # Scale: 0.0 (simple) to 1.0 (complex).
+    # Base complexity score for each agent type (0.0 - 1.0)
     AGENT_BASE_COMPLEXITY = {
-        "methodology": 0.9,
-        "results": 0.7,
-        "literature": 0.6,
-        "structure": 0.3,
-        "impact": 0.7,
-        "contradiction": 0.9,
-        "ethics": 0.5,
-        "ai_origin": 0.4,
-        "hallucination": 0.6,
-        "coordinator": 1.0, # Always high, synthesizes all reviews
-        "editor": 0.8,
-        "author_editor_summary": 0.8
+        "methodology": 0.9,         # High complexity: rigorous analysis required
+        "results": 0.8,              # High complexity: statistical analysis
+        "literature": 0.7,           # Medium-high: contextual understanding
+        "structure": 0.4,            # Lower complexity: organizational review
+        "impact": 0.8,               # High complexity: creative foresight
+        "contradiction": 0.9,        # High complexity: deep logical analysis
+        "ethics": 0.6,               # Medium complexity: balanced assessment
+        "ai_origin": 0.5,            # Medium complexity: pattern recognition
+        "hallucination": 0.7,        # Medium-high: detailed fact checking
+        "coordinator": 1.0,          # Highest: comprehensive synthesis
+        "editor": 0.9,               # High: editorial judgment
+        "author_editor_summary": 0.8 # High: professional summarization
     }
     
     def __init__(self, config: Config, paper_complexity_score: float):
@@ -574,22 +609,40 @@ class AgentFactory:
     def _determine_model_for_agent(self, agent_name: str) -> str:
         """
         Determines the best model for an agent based on task and paper complexity.
+        Uses a weighted combination of paper complexity and task-specific requirements.
         """
         base_task_complexity = self.AGENT_BASE_COMPLEXITY.get(agent_name, 0.5)
-        
-        # Combine paper complexity and task complexity.
-        # Weighting: 60% paper complexity, 40% task complexity.
-        final_score = (self.paper_complexity_score * 0.6) + (base_task_complexity * 0.4)
+        # Weight: 40% paper complexity, 60% task complexity
+        final_score = (self.paper_complexity_score * 0.4) + (base_task_complexity * 0.6)
 
-        if final_score >= 0.75:
-            model = self.config.model_powerful
-        elif final_score >= 0.5:
-            model = self.config.model_standard
+        # Adjusted thresholds to use more powerful models
+        if final_score >= 0.65:
+            model = self.config.model_powerful  # gpt-5 for complex tasks
+        elif final_score >= 0.45:
+            model = self.config.model_standard  # gpt-5-mini for moderate tasks
         else:
-            model = self.config.model_basic
+            model = self.config.model_basic     # gpt-5-nano for simple tasks
             
-        logger.info(f"Selected model '{model}' for agent '{agent_name}' (score: {final_score:.2f})")
+        logger.info(f"Selected model '{model}' for agent '{agent_name}' (complexity score: {final_score:.2f})")
         return model
+
+    def _get_temperature(self, agent_name: str) -> float:
+        """Get appropriate temperature for agent (GPT-5 only supports 1.0)."""
+        temp_map = {
+            "methodology": self.config.temperature_methodology,
+            "results": self.config.temperature_results,
+            "literature": self.config.temperature_literature,
+            "structure": self.config.temperature_structure,
+            "impact": self.config.temperature_impact,
+            "contradiction": self.config.temperature_contradiction,
+            "ethics": self.config.temperature_ethics,
+            "coordinator": self.config.temperature_coordinator,
+            "editor": self.config.temperature_editor,
+            "ai_origin": self.config.temperature_ai_origin,
+            "hallucination": self.config.temperature_hallucination,
+            "author_editor_summary": 1.0  # GPT-5 only supports 1.0
+        }
+        return temp_map.get(agent_name, 1.0)  # Default to 1.0 for GPT-5
 
     def create_methodology_agent(self) -> Agent:
         return Agent(
@@ -617,7 +670,9 @@ Structure your review with clear sections:
 
 End your review with: "REVIEW COMPLETED - Methodology Expert" """,
             model=self._determine_model_for_agent("methodology"),
-            temperature=self.config.temperature_methodology,
+            temperature=self._get_temperature("methodology"),
+            max_output_tokens=self.config.max_output_tokens,
+            use_caching=self.config.use_prompt_caching
         )
     
     def create_results_agent(self) -> Agent:
@@ -646,7 +701,9 @@ Structure your review with:
 
 End your review with: "REVIEW COMPLETED - Results Analyst" """,
             model=self._determine_model_for_agent("results"),
-            temperature=self.config.temperature_results,
+            temperature=self._get_temperature("results"),
+            max_output_tokens=self.config.max_output_tokens,
+            use_caching=self.config.use_prompt_caching
         )
     
     def create_literature_agent(self) -> Agent:
@@ -666,7 +723,9 @@ suggesting additions or changes in contextualization and bibliographic reference
 
 End your review with: "REVIEW COMPLETED - Literature Expert" """,
             model=self._determine_model_for_agent("literature"),
-            temperature=self.config.temperature_literature,
+            temperature=self._get_temperature("literature"),
+            max_output_tokens=self.config.max_output_tokens,
+            use_caching=self.config.use_prompt_caching
         )
     
     def create_structure_agent(self) -> Agent:
@@ -688,7 +747,9 @@ indicating specific sections to restructure, condense, or expand.
 
 End your review with: "REVIEW COMPLETED - Structure & Clarity Reviewer" """,
             model=self._determine_model_for_agent("structure"),
-            temperature=self.config.temperature_structure,
+            temperature=self._get_temperature("structure"),
+            max_output_tokens=self.config.max_output_tokens,
+            use_caching=self.config.use_prompt_caching
         )
     
     def create_impact_agent(self) -> Agent:
@@ -709,7 +770,9 @@ considering both strengths and limitations in terms of potential impact.
 
 End your review with: "REVIEW COMPLETED - Impact & Innovation Analyst" """,
             model=self._determine_model_for_agent("impact"),
-            temperature=self.config.temperature_impact,
+            temperature=self._get_temperature("impact"),
+            max_output_tokens=self.config.max_output_tokens,
+            use_caching=self.config.use_prompt_caching
         )
     
     def create_contradiction_agent(self) -> Agent:
@@ -733,7 +796,9 @@ If you find no contradictions or significant inconsistencies, please state "No s
 
 End your review with: "REVIEW COMPLETED - Contradiction Checker" """,
             model=self._determine_model_for_agent("contradiction"),
-            temperature=self.config.temperature_contradiction,
+            temperature=self._get_temperature("contradiction"),
+            max_output_tokens=self.config.max_output_tokens,
+            use_caching=self.config.use_prompt_caching
         )
     
     def create_ethics_agent(self) -> Agent:
@@ -755,7 +820,9 @@ positive practices and problematic areas, with suggestions for improvements.
 
 End your review with: "REVIEW COMPLETED - Ethics & Integrity Reviewer" """,
             model=self._determine_model_for_agent("ethics"),
-            temperature=self.config.temperature_ethics,
+            temperature=self._get_temperature("ethics"),
+            max_output_tokens=self.config.max_output_tokens,
+            use_caching=self.config.use_prompt_caching
         )
     
     def create_ai_origin_detector_agent(self) -> Agent:
@@ -774,15 +841,30 @@ Conclude with an estimated likelihood (e.g., Very Low, Low, Moderate, High, Very
 
 End your review with: "REVIEW COMPLETED - AI Origin Detector\"""",
             model=self._determine_model_for_agent("ai_origin"),
-            temperature=self.config.temperature_ai_origin,
+            temperature=self._get_temperature("ai_origin"),
+            max_output_tokens=self.config.max_output_tokens,
+            use_caching=self.config.use_prompt_caching
         )
 
     def create_hallucination_detector(self) -> Agent:
         return Agent(
             name="Hallucination_Detector",
-            instructions="""You are tasked with spotting potential hallucinations in the paper. Look for:\n1. Claims lacking citations\n2. Data inconsistent with official sources\n3. Conclusions not supported by presented data\n4. Invented or malformed references\nProvide a concise report IN ENGLISH detailing any suspicious statements.""",
+            instructions="""You are tasked with spotting potential hallucinations in the paper. Look for:
+1. Claims lacking citations
+2. Data inconsistent with official sources
+3. Conclusions not supported by presented data
+4. Invented or malformed references
+5. Statistical impossibilities or contradictory numbers
+6. Technical terms used incorrectly
+7. Non-existent methodologies or tools
+
+Provide a concise report IN ENGLISH detailing any suspicious statements, with specific examples from the text.
+
+End your review with: "REVIEW COMPLETED - Hallucination Detector" """,
             model=self._determine_model_for_agent("hallucination"),
-            temperature=self.config.temperature_hallucination,
+            temperature=self._get_temperature("hallucination"),
+            max_output_tokens=self.config.max_output_tokens,
+            use_caching=self.config.use_prompt_caching
         )
     
     def create_coordinator_agent(self) -> Agent:
@@ -813,7 +895,9 @@ Your final assessment should include:
 
 End with: "COORDINATOR ASSESSMENT COMPLETED" """,
             model=self._determine_model_for_agent("coordinator"),
-            temperature=self.config.temperature_coordinator,
+            temperature=self._get_temperature("coordinator"),
+            max_output_tokens=self.config.max_output_tokens,
+            use_caching=self.config.use_prompt_caching
         )
     
     def create_editor_agent(self) -> Agent:
@@ -839,7 +923,9 @@ Include clear justification for your decision and specific guidance for authors.
 
 End with: "EDITORIAL DECISION COMPLETED" """,
             model=self._determine_model_for_agent("editor"),
-            temperature=self.config.temperature_editor,
+            temperature=self._get_temperature("editor"),
+            max_output_tokens=self.config.max_output_tokens,
+            use_caching=self.config.use_prompt_caching
         )
     
     def create_author_editor_summary_agent(self) -> Agent:
@@ -861,10 +947,11 @@ Review for Editor Only:
 [Your summary here]
 ---
 
-End with: "SUMMARY AGENT COMPLETED".
-""",
+End with: "SUMMARY AGENT COMPLETED".""",
             model=self._determine_model_for_agent("author_editor_summary"),
-            temperature=1.0,
+            temperature=self._get_temperature("author_editor_summary"),
+            max_output_tokens=self.config.max_output_tokens,
+            use_caching=self.config.use_prompt_caching
         )
     
     def create_all_agents(self) -> Dict[str, Agent]:
@@ -896,15 +983,12 @@ class ReviewOrchestrator:
         self.client = AsyncOpenAI(api_key=config.api_key) if config.api_key else None
 
     async def _assess_paper_complexity(self, paper_text: str) -> float:
-        """
-        Rates task complexity on a scale of 0.0 to 1.0 using an AI model.
-        """
+        """Rates task complexity on a scale of 0.0 to 1.0 using an AI model."""
         if not self.client:
             logger.warning("No OpenAI client, using default complexity.")
             return 0.5
 
         try:
-            # Using a snippet to be efficient
             snippet = paper_text[:8000]
 
             prompt = f"""You are a scientific review expert. Your task is to assess the complexity of the provided scientific paper snippet.
@@ -924,13 +1008,14 @@ class ReviewOrchestrator:
             """
             
             response = await self.client.chat.completions.create(
-                model="gpt-4.1-mini", # Always use the fast model for this assessment
+                model="gpt-5-nano",
                 messages=[
                     {"role": "system", "content": "You are a scientific complexity analyzer. Your output must be a single, valid JSON object."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.0,
+                temperature=1.0,  # GPT-5 supporta solo 1.0
                 response_format={"type": "json_object"},
+                max_completion_tokens=200
             )
             
             result = json.loads(response.choices[0].message.content)
@@ -950,10 +1035,10 @@ class ReviewOrchestrator:
     def execute_review_process(self, paper_text: str) -> Dict[str, Any]:
         """Execute the full review process with error handling."""
         try:
-            # Assess complexity to inform agent creation
+            # Assess complexity
             complexity_score = asyncio.run(self._assess_paper_complexity(paper_text))
             
-            # Now that models are selected, create the factory and agents
+            # Create factory and agents
             self.agent_factory = AgentFactory(self.config, complexity_score)
             self.agents = self.agent_factory.create_all_agents()
 
@@ -994,13 +1079,10 @@ class ReviewOrchestrator:
     
     def _prepare_initial_message(self, paper_info: PaperInfo, paper_text: str) -> str:
         """Prepare the initial message for the agents."""
-
-        # Always keep the full text of the paper. If it exceeds the
-        # recommended threshold for some models, only log a warning.
         display_paper_text = paper_text
         original_length = len(paper_text)
 
-        MAX_RECOMMENDED_CHARS = 25000
+        MAX_RECOMMENDED_CHARS = 50000  # Increased for GPT-5 capabilities
         if original_length > MAX_RECOMMENDED_CHARS:
             logger.info(
                 f"Paper text is {original_length} characters; this may exceed some model limits "
@@ -1074,7 +1156,6 @@ The paper content is as follows:
         """Run an agent and save its review."""
         try:
             review = agent.run(message)
-            # Save the review
             self.file_manager.save_review(agent_name, review)
             return review
         except Exception as e:
@@ -1088,10 +1169,10 @@ The paper content is as follows:
             logger.error("Coordinator agent not found")
             return "Coordinator review not available"
         
-        # Prepare message with all the reviews
         reviews_text = "\n\n".join([
             f"=== {agent_name.upper()} REVIEW ===\n{review_content}"
             for agent_name, review_content in reviews.items()
+            if agent_name not in ["coordinator", "author_editor_summary"]
         ])
         
         coordinator_message = f"""
@@ -1111,16 +1192,18 @@ Please provide your comprehensive coordinator assessment based on all these revi
             return f"Error in coordinator assessment: {str(e)}"
     
     def _execute_author_editor_summary(self, reviews: Dict[str, str]) -> str:
-        """Esegue l'agente di sintesi per autore/editor."""
+        """Execute the summary agent for author/editor."""
         summary_agent = self.agents.get("author_editor_summary")
         if not summary_agent:
             logger.error("Author/Editor Summary agent not found")
             return "Author/Editor summary not available"
-        # Prepara il messaggio con tutte le review e il coordinatore
+        
         reviews_text = "\n\n".join([
             f"=== {agent_name.upper()} REVIEW ===\n{review_content}"
             for agent_name, review_content in reviews.items()
+            if agent_name != "author_editor_summary"
         ])
+        
         summary_message = f"""
 Here are all the expert reviews and the coordinator's assessment for the paper:
 
@@ -1143,7 +1226,6 @@ Please provide the two requested summaries as per your instructions.
             logger.error("Editor agent not found")
             return "Editorial decision not available"
         
-        # Prepare message with all reviews including the coordinator
         reviews_text = "\n\n".join([
             f"=== {agent_name.upper()} REVIEW ===\n{review_content}"
             for agent_name, review_content in all_reviews.items()
@@ -1179,24 +1261,26 @@ Please provide your editorial decision based on all these reviews.
                     "standard": self.config.model_standard,
                     "basic": self.config.model_basic
                 },
-                "num_reviewers": len(reviews)
+                "num_reviewers": len([r for r in reviews.keys() if r not in ["coordinator", "author_editor_summary"]])
             }
         }
     
     def _generate_reports(self, results: Dict[str, Any]) -> None:
         """Generate reports in various formats."""
-        # Report Markdown
+        # ReviewDashboard is defined in this same file
+        
+        # Markdown Report
         report_md = self._generate_markdown_report(results)
         self.file_manager.save_text(report_md, f"review_report_{datetime.now():%Y%m%d_%H%M%S}.md")
         
-        # Report JSON
+        # JSON Report
         self.file_manager.save_json(results, f"review_results_{datetime.now():%Y%m%d_%H%M%S}.json")
         
-        # Executive summary
+        # Executive Summary
         summary = self._generate_executive_summary(results)
         self.file_manager.save_text(summary, f"executive_summary_{datetime.now():%Y%m%d_%H%M%S}.md")
 
-        # Dashboard HTML
+        # HTML Dashboard
         dashboard = ReviewDashboard().generate_html_dashboard(results)
         self.file_manager.save_text(dashboard, f"dashboard_{datetime.now():%Y%m%d_%H%M%S}.html")
     
@@ -1247,7 +1331,6 @@ Please provide your editorial decision based on all these reviews.
 ## Detailed Reviews
 
 """
-        # Aggiungi revisioni individuali
         review_order = [
             "methodology",
             "results",
@@ -1272,6 +1355,7 @@ Please provide your editorial decision based on all these reviews.
         editor_decision = results["editor_decision"]
         coordinator_assessment = results["reviews"].get("coordinator", "")
         author_editor_summary = results["reviews"].get("author_editor_summary", "")
+        
         summary = f"""# Executive Summary
 
 **Paper:** {paper_info['title']}
@@ -1292,7 +1376,7 @@ Please provide your editorial decision based on all these reviews.
 
 ## Review Summary
 
-This paper has been reviewed by 8 specialized AI agents, each focusing on different aspects of the manuscript:
+This paper has been reviewed by 9 specialized AI agents (powered by GPT-5), each focusing on different aspects of the manuscript:
 
 1. **Methodology Expert**: Evaluated experimental design and statistical rigor
 2. **Results Analyst**: Assessed data analysis and presentation
@@ -1302,6 +1386,7 @@ This paper has been reviewed by 8 specialized AI agents, each focusing on differ
 6. **Contradiction Checker**: Identified inconsistencies and logical issues
 7. **Ethics & Integrity Reviewer**: Assessed ethical compliance and transparency
 8. **AI Origin Detector**: Assessed the likelihood of AI authorship
+9. **Hallucination Detector**: Identified potential fabrications or unsupported claims
 
 The reviews were synthesized by a Review Coordinator and evaluated by a Journal Editor for the final publication decision.
 
@@ -1326,7 +1411,6 @@ class ReviewDashboard:
             import html
             return html.escape(str(text))
         
-        # Extract the editor's decision (search common patterns)
         decision_class = "bg-gray-100"
         decision_icon = "📋"
         if "accept as is" in editor_decision.lower():
@@ -1342,11 +1426,10 @@ class ReviewDashboard:
             decision_class = "bg-red-100 border-red-300 text-red-900"
             decision_icon = "❌"
         
-        # Calculate statistics
-        total_reviews = len(reviews)
+        total_reviews = len([r for r in reviews.keys() if r not in ["coordinator", "author_editor_summary"]])
         total_words = sum(len(review.split()) for review in reviews.values())
         
-        # HTML with modern design
+        # HTML with modern design - same as before but with updated agent count
         html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1367,56 +1450,19 @@ class ReviewDashboard:
             transform: translateY(-2px);
             box-shadow: 0 12px 24px rgba(0,0,0,0.1);
         }}
-        .progress-bar {{
-            transition: width 1s ease-in-out;
-        }}
-        details summary {{
-            cursor: pointer;
-            user-select: none;
-        }}
-        details[open] summary {{
-            margin-bottom: 1rem;
-        }}
-        .review-content {{
-            max-height: 500px;
-            overflow-y: auto;
-        }}
-        .review-content::-webkit-scrollbar {{
-            width: 6px;
-        }}
-        .review-content::-webkit-scrollbar-track {{
-            background: #f1f1f1;
-        }}
-        .review-content::-webkit-scrollbar-thumb {{
-            background: #888;
-            border-radius: 3px;
-        }}
-        @keyframes fadeIn {{
-            from {{ opacity: 0; transform: translateY(20px); }}
-            to {{ opacity: 1; transform: translateY(0); }}
-        }}
-        .fade-in {{
-            animation: fadeIn 0.6s ease-out forwards;
-        }}
     </style>
 </head>
 <body class="bg-gray-50">
-    <!-- Header -->
     <div class="gradient-bg text-white">
         <div class="container mx-auto px-6 py-12">
             <h1 class="text-4xl font-bold mb-2">📚 Peer Review Dashboard</h1>
-            <p class="text-purple-100">Advanced Multi-Agent Review System</p>
+            <p class="text-purple-100">Advanced Multi-Agent Review System - Powered by GPT-5</p>
         </div>
     </div>
     
-    <!-- Main Content -->
     <div class="container mx-auto px-6 py-8 max-w-7xl">
-        <!-- Paper Info Card -->
-        <div class="bg-white rounded-lg shadow-lg p-8 mb-8 fade-in">
-            <h2 class="text-2xl font-semibold mb-6 flex items-center">
-                <span class="bg-purple-100 text-purple-600 p-2 rounded-lg mr-3">📄</span>
-                Paper Information
-            </h2>
+        <div class="bg-white rounded-lg shadow-lg p-8 mb-8">
+            <h2 class="text-2xl font-semibold mb-6">📄 Paper Information</h2>
             <div class="grid md:grid-cols-2 gap-6">
                 <div>
                     <h3 class="text-sm font-medium text-gray-500 uppercase tracking-wide mb-2">Title</h3>
@@ -1435,29 +1481,9 @@ class ReviewDashboard:
                     <p class="text-lg text-gray-700">{esc(timestamp)}</p>
                 </div>
             </div>
-            {f"""
-            <div class="mt-6">
-                <h3 class="text-sm font-medium text-gray-500 uppercase tracking-wide mb-2">Abstract</h3>
-                <div class="relative">
-                    <div id="abstract-content" class="text-gray-700 leading-relaxed overflow-hidden transition-all duration-300" style="max-height: 150px;">
-                        <p>{esc(paper.get('abstract', 'Not available'))}</p>
-                    </div>
-                    <div id="abstract-gradient" class="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-white to-transparent pointer-events-none"></div>
-                    <button id="abstract-toggle" class="mt-2 text-purple-600 hover:text-purple-700 font-medium text-sm focus:outline-none">
-                        Show more ▼
-                    </button>
-                </div>
-            </div>
-            """ if paper.get('abstract') and len(paper.get('abstract', '')) > 300 else f"""
-            <div class="mt-6">
-                <h3 class="text-sm font-medium text-gray-500 uppercase tracking-wide mb-2">Abstract</h3>
-                <p class="text-gray-700 leading-relaxed">{esc(paper.get('abstract', 'Not available'))}</p>
-            </div>
-            """ if paper.get('abstract') else ""}
         </div>
         
-        <!-- Editorial Decision -->
-        <div class="bg-white rounded-lg shadow-lg p-8 mb-8 fade-in" style="animation-delay: 0.1s;">
+        <div class="bg-white rounded-lg shadow-lg p-8 mb-8">
             <h2 class="text-2xl font-semibold mb-6 flex items-center">
                 <span class="text-2xl mr-3">{decision_icon}</span>
                 Editorial Decision
@@ -1467,167 +1493,21 @@ class ReviewDashboard:
             </div>
         </div>
         
-        <!-- Review Statistics -->
         <div class="grid md:grid-cols-3 gap-6 mb-8">
-            <div class="bg-white rounded-lg shadow-lg p-6 text-center fade-in" style="animation-delay: 0.2s;">
+            <div class="bg-white rounded-lg shadow-lg p-6 text-center">
                 <div class="text-3xl font-bold text-purple-600">{total_reviews}</div>
                 <div class="text-gray-600 mt-2">Expert Reviews</div>
             </div>
-            <div class="bg-white rounded-lg shadow-lg p-6 text-center fade-in" style="animation-delay: 0.3s;">
+            <div class="bg-white rounded-lg shadow-lg p-6 text-center">
                 <div class="text-3xl font-bold text-purple-600">{total_words:,}</div>
                 <div class="text-gray-600 mt-2">Total Words</div>
             </div>
-            <div class="bg-white rounded-lg shadow-lg p-6 text-center fade-in" style="animation-delay: 0.4s;">
+            <div class="bg-white rounded-lg shadow-lg p-6 text-center">
                 <div class="text-3xl font-bold text-purple-600">{total_words // max(total_reviews, 1)}</div>
                 <div class="text-gray-600 mt-2">Avg Words/Review</div>
             </div>
         </div>
-        """
-        # Sezione sintesi Author & Editor Summary
-        author_editor_summary = reviews.get("author_editor_summary", "")
-        if author_editor_summary:
-            html += f'''
-    <!-- Author & Editor Summary -->
-    <div class="bg-white rounded-lg shadow-lg p-8 mb-8 fade-in" style="animation-delay: 0.45s;">
-        <h2 class="text-2xl font-semibold mb-6 flex items-center">
-            <span class="bg-yellow-100 text-yellow-600 p-2 rounded-lg mr-3">📝</span>
-            Author & Editor Summary
-        </h2>
-        <div class="bg-yellow-50 border-l-4 border-yellow-300 rounded-lg p-6">
-            <pre class="whitespace-pre-wrap text-base leading-relaxed text-gray-800">{esc(author_editor_summary)}</pre>
-        </div>
     </div>
-'''
-        # Individual Reviews
-        html += '''
-        <!-- Individual Reviews -->
-        <div class="bg-white rounded-lg shadow-lg p-8 fade-in" style="animation-delay: 0.5s;">
-            <h2 class="text-2xl font-semibold mb-6 flex items-center">
-                <span class="bg-purple-100 text-purple-600 p-2 rounded-lg mr-3">👥</span>
-                Expert Reviews
-            </h2>
-            <div class="space-y-4">
-'''
-        
-        # Mappa per icone e colori dei revisori
-        reviewer_styles = {
-            "methodology": ("🔬", "bg-blue-50 border-blue-200"),
-            "results": ("📊", "bg-green-50 border-green-200"),
-            "literature": ("📚", "bg-yellow-50 border-yellow-200"),
-            "structure": ("🏗️", "bg-purple-50 border-purple-200"),
-            "impact": ("💡", "bg-pink-50 border-pink-200"),
-            "contradiction": ("⚡", "bg-red-50 border-red-200"),
-            "ethics": ("⚖️", "bg-indigo-50 border-indigo-200"),
-            "ai_origin": ("🤖", "bg-gray-50 border-gray-200"),
-            "hallucination": ("🔍", "bg-orange-50 border-orange-200"),
-            "coordinator": ("🎯", "bg-teal-50 border-teal-200"),
-        }
-        
-        # Ordine preferito per i revisori
-        review_order = ["coordinator", "methodology", "results", "literature", 
-                       "structure", "impact", "contradiction", "ethics", 
-                       "ai_origin", "hallucination"]
-        
-        # Aggiungi le review nell'ordine specificato
-        for reviewer_type in review_order:
-            if reviewer_type in reviews:
-                icon, style = reviewer_styles.get(reviewer_type, ("📝", "bg-gray-50 border-gray-200"))
-                review_content = reviews[reviewer_type]
-                word_count = len(review_content.split())
-                
-                html += f"""
-                    <details class="review-card {style} border-2 rounded-lg overflow-hidden">
-                        <summary class="p-6 hover:bg-gray-50 transition-colors">
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center">
-                                    <span class="text-2xl mr-3">{icon}</span>
-                                    <div>
-                                        <h3 class="text-lg font-semibold">{reviewer_type.replace('_', ' ').title()}</h3>
-                                        <p class="text-sm text-gray-600">{word_count} words</p>
-                                    </div>
-                                </div>
-                                <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                                </svg>
-                            </div>
-                        </summary>
-                        <div class="px-6 pb-6">
-                            <div class="review-content bg-white rounded-lg p-4 border border-gray-200">
-                                <pre class="whitespace-pre-wrap text-sm text-gray-700 leading-relaxed">{esc(review_content)}</pre>
-                            </div>
-                        </div>
-                    </details>
-"""
-        
-        html += """
-            </div>
-        </div>
-    </div>
-    
-    <!-- Footer -->
-    <footer class="bg-gray-800 text-white py-8 mt-16">
-        <div class="container mx-auto px-6 text-center">
-            <p class="text-gray-400">Generated by Advanced Multi-Agent Paper Review System</p>
-            <p class="text-sm text-gray-500 mt-2">Powered by OpenAI GPT Models</p>
-        </div>
-    </footer>
-    
-    <script>
-        // Smooth reveal animation on scroll
-        const observerOptions = {
-            threshold: 0.1,
-            rootMargin: '0px 0px -50px 0px'
-        };
-        
-        const observer = new IntersectionObserver((entries) => {
-            entries.forEach(entry => {
-                if (entry.isIntersecting) {
-                    entry.target.classList.add('fade-in');
-                }
-            });
-        }, observerOptions);
-        
-        document.querySelectorAll('.fade-in').forEach(el => observer.observe(el));
-        
-        // Toggle animation for details
-        document.querySelectorAll('details').forEach(detail => {
-            detail.addEventListener('toggle', (e) => {
-                if (e.target.open) {
-                    e.target.querySelector('.review-content').style.animation = 'fadeIn 0.3s ease-out';
-                }
-            });
-        });
-        
-        // Handle expand/collapse for abstract
-        const abstractContent = document.getElementById('abstract-content');
-        const abstractToggle = document.getElementById('abstract-toggle');
-        const abstractGradient = document.getElementById('abstract-gradient');
-        
-        if (abstractToggle) {
-            let isExpanded = false;
-            
-            abstractToggle.addEventListener('click', () => {
-                isExpanded = !isExpanded;
-                
-                if (isExpanded) {
-                    abstractContent.style.maxHeight = abstractContent.scrollHeight + 'px';
-                    abstractToggle.textContent = 'Show less ▲';
-                    abstractGradient.style.display = 'none';
-                } else {
-                    abstractContent.style.maxHeight = '150px';
-                    abstractToggle.textContent = 'Show more ▼';
-                    abstractGradient.style.display = 'block';
-                }
-            });
-            
-            // Check if the abstract is short enough to show entirely
-            if (abstractContent && abstractContent.scrollHeight <= 150) {
-                abstractToggle.style.display = 'none';
-                abstractGradient.style.display = 'none';
-                abstractContent.style.maxHeight = 'none';
-            }
-        }
-    </script>
 </body>
 </html>"""
         
@@ -1653,36 +1533,35 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(
-        description="Advanced Multi-Agent System for Scientific Paper Review"
+        description="Advanced Multi-Agent System for Scientific Paper Review - Optimized for GPT-5"
     )
     parser.add_argument("paper_path", help="Path to the paper file to review")
     parser.add_argument("--config", default="config.yaml", help="Path to configuration file")
     parser.add_argument("--output-dir", help="Override output directory")
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+    parser.add_argument("--reasoning-effort", default="medium", choices=["low", "medium", "high"],
+                       help="Reasoning effort for GPT-5 models")
     
     args = parser.parse_args()
     
-    # Setup logging with specified level
+    # Setup logging
     global logger
     logger = setup_logging(args.log_level)
     
     try:
         # Load configuration
         config = Config.from_yaml(args.config)
-        # Se l'utente non specifica --output-dir, crea una directory unica con timestamp
         if args.output_dir:
             config.output_dir = args.output_dir
-        else:
-            from datetime import datetime
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            config.output_dir = f"output_revisione_paper_{timestamp}"
+        if args.reasoning_effort:
+            config.reasoning_effort = args.reasoning_effort
         
         # Validate configuration
         config.validate()
         health = system_health_check(config)
         logger.info(f"System health: {health}")
         
-        # Read paper (PDF or text)
+        # Read paper
         file_manager = FileManager(config.output_dir)
         if args.paper_path.lower().endswith(".pdf"):
             paper_text = file_manager.extract_text_from_pdf(args.paper_path)
@@ -1700,6 +1579,7 @@ def main():
         results = orchestrator.execute_review_process(paper_text)
         
         logger.info(f"Review process completed. Results saved in: {config.output_dir}")
+        logger.info("✅ PROCESS COMPLETED SUCCESSFULLY!")
         
         return 0
         
@@ -1713,3 +1593,7 @@ def main():
 if __name__ == "__main__":
     import sys
     sys.exit(main())
+
+
+
+
