@@ -1,0 +1,156 @@
+# Configurazione esempio per sistema multi-agente ottimizzato
+# File: config_example.yaml
+
+# ============================================
+# MODELLI GPT-5
+# ============================================
+# gpt-5: Massima intelligenza, reasoning più alto ($1.25/$10)
+# gpt-5-mini: Bilanciato velocità/qualità ($0.25/$2)
+# gpt-5-nano: Velocissimo ed economico ($0.05/$0.40)
+
+model_powerful: "gpt-5"
+model_standard: "gpt-5-mini"
+model_basic: "gpt-5-nano"
+
+# ============================================
+# TEMPERATURE (0.0-1.0)
+# ============================================
+# Bassa (0.2-0.4): Task deterministici e analitici
+# Media (0.5-0.6): Task bilanciati
+# Alta (0.7-0.9): Task creativi e esplorativi
+
+# Task analitici - richiedono precisione
+temperature_methodology: 0.4      # Analisi metodologica rigorosa
+temperature_results: 0.4          # Analisi statistica precisa
+temperature_contradiction: 0.3    # Ricerca contraddizioni (massima precisione)
+temperature_hallucination: 0.3    # Rilevamento fabricazioni (massima precisione)
+
+# Task bilanciati
+temperature_structure: 0.5        # Valutazione struttura
+temperature_ethics: 0.5           # Valutazione etica
+temperature_coordinator: 0.6      # Sintesi review
+temperature_editor: 0.5           # Decisione editoriale
+
+# Task creativi - richiedono visione più ampia
+temperature_literature: 0.6       # Trovare connessioni con letteratura
+temperature_impact: 0.7           # Valutare impatto futuro
+temperature_ai_origin: 0.4        # Rilevamento AI
+
+# ============================================
+# REASONING EFFORT
+# ============================================
+# low: Task semplici, risposta veloce
+# medium: Task standard (default)
+# high: Task complessi, analisi profonda
+
+reasoning_effort: "medium"
+
+# ============================================
+# OUTPUT CONFIGURATION
+# ============================================
+# GPT-5 supporta fino a 128K token in output
+# Valori consigliati:
+# - Paper brevi (<10 pagine): 8000
+# - Paper medi (10-30 pagine): 16000
+# - Paper lunghi (>30 pagine): 24000
+
+max_output_tokens: 16000
+
+# ============================================
+# DIRECTORY OUTPUT
+# ============================================
+output_dir: "output_revisione_paper"
+
+# ============================================
+# PARALLELISMO
+# ============================================
+# Dipende dal tuo tier OpenAI:
+# Tier 1: 500 RPM → usa 3-4
+# Tier 2: 5000 RPM → usa 6-8
+# Tier 3+: 5000+ RPM → usa 8-10
+
+max_parallel_agents: 6
+
+# ============================================
+# TIMEOUT
+# ============================================
+# Tempo massimo (secondi) per completare un agente
+# Con reasoning "high" potrebbe servire più tempo
+
+agent_timeout: 600
+
+# ============================================
+# PROMPT CACHING
+# ============================================
+# Abilita caching dei prompt per risparmiare fino all'87.5%
+# Il paper viene cachato e riusato da tutti gli agenti
+# Risparmio: ~$0.45 per review su paper medio
+
+use_prompt_caching: true
+
+# ============================================
+# CONFIGURAZIONI PRESET
+# ============================================
+
+# PRESET 1: MASSIMA QUALITÀ (costoso, lento, accurato)
+# Uncomment e modifica le configurazioni sopra:
+# model_powerful: "gpt-5"
+# model_standard: "gpt-5"
+# model_basic: "gpt-5-mini"
+# reasoning_effort: "high"
+# max_output_tokens: 24000
+# max_parallel_agents: 4
+# temperature_methodology: 0.3
+# temperature_contradiction: 0.2
+
+# PRESET 2: BILANCIATO (default - raccomandato)
+# Già configurato sopra
+
+# PRESET 3: VELOCE ED ECONOMICO (veloce, economico, qualità buona)
+# model_powerful: "gpt-5-mini"
+# model_standard: "gpt-5-mini"
+# model_basic: "gpt-5-nano"
+# reasoning_effort: "low"
+# max_output_tokens: 8000
+# max_parallel_agents: 8
+# use_prompt_caching: true
+
+# PRESET 4: ULTRA-ECONOMICO (massimo risparmio)
+# model_powerful: "gpt-5-mini"
+# model_standard: "gpt-5-nano"
+# model_basic: "gpt-5-nano"
+# reasoning_effort: "low"
+# max_output_tokens: 4000
+# max_parallel_agents: 10
+# use_prompt_caching: true
+
+# ============================================
+# NOTE
+# ============================================
+# 
+# 1. API KEY: Imposta sempre OPENAI_API_KEY come variabile d'ambiente
+#    export OPENAI_API_KEY="sk-..."
+#
+# 2. RATE LIMITS: Controlla il tuo tier su platform.openai.com
+#    e adatta max_parallel_agents di conseguenza
+#
+# 3. COSTI STIMATI per paper 50K caratteri:
+#    - Preset 1 (Qualità): ~$2.50
+#    - Preset 2 (Bilanciato): ~$1.30
+#    - Preset 3 (Veloce): ~$0.60
+#    - Preset 4 (Economico): ~$0.30
+#
+# 4. TEMPERATURE: Non usare mai 0.0 o 1.0 agli estremi
+#    GPT-5 performa meglio con valori intermedi
+#
+# 5. REASONING: "high" può aumentare i costi del 30-50%
+#    ma migliora significativamente la qualità
+#
+# 6. CACHING: Funziona meglio quando processi più paper
+#    consecutivamente o fai revisioni iterative
+#
+# ============================================
+
+
+
+
