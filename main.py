@@ -1267,8 +1267,6 @@ Please provide your editorial decision based on all these reviews.
     
     def _generate_reports(self, results: Dict[str, Any]) -> None:
         """Generate reports in various formats."""
-        # ReviewDashboard is defined in this same file
-        
         # Markdown Report
         report_md = self._generate_markdown_report(results)
         self.file_manager.save_text(report_md, f"review_report_{datetime.now():%Y%m%d_%H%M%S}.md")
