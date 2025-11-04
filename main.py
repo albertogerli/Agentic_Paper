@@ -1504,6 +1504,66 @@ class ReviewDashboard:
                 <div class="text-3xl font-bold text-purple-600">{total_words // max(total_reviews, 1)}</div>
                 <div class="text-gray-600 mt-2">Avg Words/Review</div>
             </div>
+        </div>"""
+        
+        # Add Coordinator Assessment if present
+        if "coordinator" in reviews:
+            html += f"""
+        <div class="bg-white rounded-lg shadow-lg p-8 mb-8">
+            <h2 class="text-2xl font-semibold mb-6 flex items-center">
+                <span class="text-2xl mr-3">🎯</span>
+                Coordinator Assessment
+            </h2>
+            <div class="bg-blue-50 border-2 border-blue-200 rounded-lg p-6">
+                <pre class="whitespace-pre-wrap text-sm leading-relaxed text-gray-800">{esc(reviews["coordinator"])}</pre>
+            </div>
+        </div>"""
+        
+        # Add Author & Editor Summary if present
+        if "author_editor_summary" in reviews:
+            html += f"""
+        <div class="bg-white rounded-lg shadow-lg p-8 mb-8">
+            <h2 class="text-2xl font-semibold mb-6 flex items-center">
+                <span class="text-2xl mr-3">📝</span>
+                Author & Editor Summary
+            </h2>
+            <div class="bg-purple-50 border-2 border-purple-200 rounded-lg p-6">
+                <pre class="whitespace-pre-wrap text-sm leading-relaxed text-gray-800">{esc(reviews["author_editor_summary"])}</pre>
+            </div>
+        </div>"""
+        
+        # Add detailed reviews section
+        html += """
+        <div class="bg-white rounded-lg shadow-lg p-8 mb-8">
+            <h2 class="text-2xl font-semibold mb-6">📋 Detailed Expert Reviews</h2>
+            <div class="space-y-6">"""
+        
+        # Define review order and icons
+        review_config = {
+            "methodology": ("🔬", "Methodology Expert", "bg-green-50 border-green-200"),
+            "results": ("📊", "Results Analyst", "bg-blue-50 border-blue-200"),
+            "literature": ("📚", "Literature Expert", "bg-purple-50 border-purple-200"),
+            "structure": ("🏗️", "Structure & Clarity Reviewer", "bg-yellow-50 border-yellow-200"),
+            "impact": ("💡", "Impact & Innovation Analyst", "bg-pink-50 border-pink-200"),
+            "contradiction": ("🔍", "Contradiction Checker", "bg-red-50 border-red-200"),
+            "ethics": ("⚖️", "Ethics & Integrity Reviewer", "bg-indigo-50 border-indigo-200"),
+            "ai_origin": ("🤖", "AI Origin Detector", "bg-cyan-50 border-cyan-200"),
+            "hallucination": ("🚨", "Hallucination Detector", "bg-orange-50 border-orange-200"),
+        }
+        
+        for agent_key, (icon, title, card_class) in review_config.items():
+            if agent_key in reviews:
+                html += f"""
+                <div class="review-card border-2 {card_class} rounded-lg p-6">
+                    <h3 class="text-xl font-semibold mb-4 flex items-center">
+                        <span class="text-2xl mr-3">{icon}</span>
+                        {title}
+                    </h3>
+                    <pre class="whitespace-pre-wrap text-sm leading-relaxed text-gray-800">{esc(reviews[agent_key])}</pre>
+                </div>"""
+        
+        html += """
+            </div>
         </div>
     </div>
 </body>
