@@ -73,16 +73,16 @@ export OPENAI_API_KEY="your-api-key-here"
 
 ```bash
 # Review a paper (PDF or text file)
-python Agenti8_improved.py path/to/paper.pdf
+python main.py path/to/paper.pdf
 
 # With custom configuration
-python Agenti8_improved.py path/to/paper.pdf --config config.yaml
+python main.py path/to/paper.pdf --config config.yaml
 
 # With custom output directory
-python Agenti8_improved.py path/to/paper.pdf --output-dir ./custom_output
+python main.py path/to/paper.pdf --output-dir ./custom_output
 
 # With debug logging
-python Agenti8_improved.py path/to/paper.pdf --log-level DEBUG
+python main.py path/to/paper.pdf --log-level DEBUG
 ```
 
 ### Configuration File (Optional)
