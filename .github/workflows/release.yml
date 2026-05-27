@@ -38,9 +38,9 @@ jobs:
           ls -lah dist/
 
       - name: Verify metadata
-        run: |
-          uv pip install --system twine
-          twine check dist/*
+        # uvx fetches twine in an ephemeral env — avoids hitting the
+        # externally-managed system Python on the GH runners (PEP 668).
+        run: uvx twine check dist/*
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
