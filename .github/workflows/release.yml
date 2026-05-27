@@ -24,9 +24,10 @@ jobs:
           fetch-depth: 0
 
       - name: Install uv
+        # enable-cache requires a uv.lock; this project locks via
+        # requirements-lock.txt (pip-compile style), not uv, so we leave the
+        # cache off rather than fabricate a uv.lock that nobody else uses.
         uses: astral-sh/setup-uv@v3
-        with:
-          enable-cache: true
 
       - name: Set up Python 3.12
         run: uv python install 3.12
