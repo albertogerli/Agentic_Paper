@@ -1,9 +1,14 @@
 # Core Dependencies
-openai>=1.12.0
+openai>=1.60.0      # need >=1.50 for the Responses API; >=1.60 for `reasoning.effort=xhigh`
 pdfplumber>=0.10.3
 tenacity>=8.2.3
 pyyaml>=6.0.1
-aiohttp>=3.9.1
+pydantic>=2.0.0
+
+# Multi-provider SDKs (Prompt 3). Optional at runtime — providers/registry.py
+# skips any whose SDK is not installed and logs a warning.
+anthropic>=0.40.0       # adaptive thinking on Claude 4.6+
+google-genai>=1.51.0    # thinking_level support for Gemini 3.x
 
 # Data Processing
 python-dateutil>=2.8.2
@@ -14,4 +19,3 @@ python-dateutil>=2.8.2
 # pandas>=2.0.0
 # matplotlib>=3.7.0
 # requests>=2.31.0
-

@@ -1,0 +1,33 @@
+{
+  "summary": "The paper proposes a new transformer variant for tabular regression but understates the role of preprocessing in the reported gains. Clear writing and a careful ablation, but headline claims rest on a small benchmark suite.",
+  "strengths": [
+    "Clean separation of preprocessing, architecture, and training contributions.",
+    "Ablation isolates the attention-bias term.",
+    "Code released with reproducible seeds."
+  ],
+  "concerns": [
+    {
+      "severity": "fatal",
+      "section": "4.1 Benchmarks",
+      "page": 6,
+      "issue": "All headline results come from three datasets in the same domain; the abstract claims general-purpose superiority.",
+      "suggested_fix": "Rerun on a heterogeneous benchmark (e.g. add OpenML-CC18 subset) before claiming generality, or soften the claim in the abstract."
+    },
+    {
+      "severity": "major",
+      "section": "3.2 Architecture",
+      "page": 4,
+      "issue": "The bias term is computed using the validation set, leaking information into the training loop.",
+      "suggested_fix": "Recompute the bias term on a held-out chunk of the training set; rerun §4.1 and §4.2."
+    },
+    {
+      "severity": "minor",
+      "section": "5 Discussion",
+      "page": null,
+      "issue": "Compute costs are reported only in wall-clock seconds, not FLOPs.",
+      "suggested_fix": "Add a FLOPs estimate or note the GPU model used."
+    }
+  ],
+  "recommendation": "major_rev",
+  "confidence": 0.78
+}

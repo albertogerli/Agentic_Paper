@@ -2,6 +2,72 @@
 
 All notable changes to the Multi-Agent Paper Review System.
 
+## [2.1.0] - 2026-05-27
+
+### Added
+- **Auto-Mode for missing API keys**: when the BYOK form is submitted with only a
+  subset of the keys a routing profile expects, every tier pointing at an
+  unavailable provider is transparently remapped to a per-tier-equivalent model
+  on a provider the user *did* supply (e.g. `tier_high: anthropic/claude-opus-4-7`
+  → `google/gemini-3-pro` when only `GOOGLE_API_KEY` is given). Implemented in
+  `routing.apply_auto_mode(routing, available_providers) → (RoutingConfig, list[str])`.
+  Original input routing is never mutated. `thinking_budget` is preserved across
+  the remap so reasoning-tier intensity carries over.
+- **Auto-Mode UI banner**: a prominent yellow banner at the top of the run page
+  lists each tier remap (`Anthropic not available → mapped High tier from
+  anthropic/claude-sonnet-4-6 to google/gemini-3-pro`) so the user sees exactly
+  what changed before the agents finish.
+- `RunStatus.auto_mode_warnings: list[str]` carries the warnings from
+  `_build_user_config` through `RunRegistry.start()` to the template renderer.
+- `tests/test_auto_mode.py` with 8 unit tests covering no-op, full-remap,
+  selective-remap, immutability, and thinking-budget preservation cases.
+
+### Changed
+- `web/server._build_user_config()` now returns `tuple[Config, list[str]]`
+  instead of just `Config`. Auto-Mode only triggers when at least one BYOK key
+  is supplied; runs that fall back to the server-side config are left alone.
+  When the user explicitly picks a primary (provider, model) pair, that wins
+  and auto-mode warnings are dropped.
+
+## [2.0.0] - 2026-05-27
+
+First public PyPI release: `pip install agentic-paper`. Major rewrite of the
+v1 monolith into a typed, modular, multi-provider, fully-audited pipeline.
+See README for the user-facing pitch; highlights below.
+
+### Added
+- Multi-provider routing (OpenAI / Anthropic / Google / OpenAI-compat local).
+- Structured outputs via pydantic models for every reviewer.
+- `StorageProvider` ABC + `LocalFileStorage` (S3 / DB ready).
+- `ConcurrentAgentRunner` isolating asyncio fan-out from orchestrator logic.
+- OpenAlex citation validator (no key required).
+- R `statcheck` subprocess integration for numerical p-value sanity checking.
+- FastAPI + HTMX web UI with live thinking-delta SSE stream.
+- BYOK form (keys never written to disk, never logged).
+- Routing profiles `max` / `std` / `quick`.
+- Reproducibility: `--seed` flag forwarded to OpenAI + Google; per-call
+  `audit.jsonl` row (12 fields).
+- Retry-failed-agents endpoint.
+- Compare-versions: v1/v2 diff feeds a Revision Assessor agent.
+- 224-test pytest suite, CI on Python 3.10/3.11/3.12.
+
+### Removed
+- v1 R port (`agentic_paper_R/`) — was non-functional AI-generation artefact.
+
+## [Unreleased] — v2.x refactor
+
+### Removed
+- **`agentic_paper_R/`**: the v1 R port (~1,230 lines across `agents.R`, `config.R`,
+  `file_manager.R`, `utils.R`, and an example config) was an AI-generation artifact
+  rather than a working component. Two of the four `.R` files were partially
+  un-parseable (Markdown narration + code fences pasted inline); two further files
+  referenced in the commentary (`paper_info.R`, `paper_analyzer.R`) were never
+  extracted; there was no orchestrator entry point; and grepping the Python tree
+  for `agentic_paper_R`, `reticulate`, or `Rscript` returned zero matches — the
+  two sides had never communicated. See `R_COMPONENT_DECISION.md` for the full
+  investigation. A clean R-side statistical-sanity component (statcheck-style
+  p-value consistency checking) is on the roadmap but not committed to a timeline.
+
 ## [2.0.0] - 2025-11-04
 
 ### 🎯 Major Changes

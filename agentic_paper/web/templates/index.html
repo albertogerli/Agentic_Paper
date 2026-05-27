@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agentic Paper — drop a PDF</title>
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    .gradient-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+    .drop.dragover { background: #ede9fe; border-color: #6d28d9; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <div class="gradient-bg text-white">
+    <div class="container mx-auto px-6 py-10 max-w-4xl">
+      <h1 class="text-3xl font-bold mb-1">📚 Agentic Paper</h1>
+      <p class="text-purple-100 text-sm">
+        Multi-agent peer review · structured outputs · per-call audit log
+        · <code>v{{ version }}</code>
+      </p>
+    </div>
+  </div>
+
+  <div class="container mx-auto px-6 py-10 max-w-3xl">
+
+    <!-- Auto-simulation disclaimer -->
+    <div class="mb-6 bg-amber-50 border-l-4 border-amber-400 rounded-r-lg p-4">
+      <div class="flex">
+        <div class="text-2xl mr-3">⚠️</div>
+        <div class="text-sm text-amber-900">
+          <p class="font-semibold mb-1">Auto-simulation mode — self-review only.</p>
+          <p class="leading-snug">
+            This tool runs LLM agents that <em>simulate</em> a peer-review
+            committee. Use it on your own manuscripts to dry-run feedback
+            before submitting to a real journal. It is <strong>not</strong> a
+            substitute for human peer review, and should <strong>not</strong>
+            be used to assess another author's paper without their explicit
+            consent. LLM agents can hallucinate, miss context, or carry
+            training biases — treat every recommendation as a starting point
+            for human judgement, never the final word.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <form id="upload"
+          hx-post="/review"
+          hx-encoding="multipart/form-data"
+          hx-target="#status"
+          hx-on::after-request="if(event.detail.successful){const r=JSON.parse(event.detail.xhr.responseText); window.location='/runs/'+r.run_id;}"
+          class="drop border-2 border-dashed border-gray-300 rounded-lg p-10 text-center bg-white"
+          ondragover="event.preventDefault(); this.classList.add('dragover')"
+          ondragleave="this.classList.remove('dragover')"
+          ondrop="event.preventDefault(); this.classList.remove('dragover'); document.querySelector('#file').files=event.dataTransfer.files; document.querySelector('#name').textContent=event.dataTransfer.files[0]?.name||''">
+      <div class="text-5xl mb-3">📄</div>
+      <p class="text-lg font-medium text-gray-800 mb-1">Drop a PDF or text file</p>
+      <p class="text-sm text-gray-500 mb-4">…or click to browse.</p>
+      <input id="file" type="file" name="file" accept=".pdf,.txt"
+             onchange="document.querySelector('#name').textContent=this.files[0]?.name||''"
+             required class="mx-auto block mb-3 text-sm">
+      <p id="name" class="text-xs text-gray-600 mb-3"></p>
+
+      <details class="text-left bg-gray-50 border border-gray-200 rounded p-3 mb-4">
+        <summary class="cursor-pointer text-sm font-medium text-gray-800">
+          🔁 Compare against an earlier version (optional)
+        </summary>
+        <p class="text-xs text-gray-600 mt-2 mb-3">
+          Drop the previous draft (v1) here. Agentic_Paper will diff it
+          against the file above (v2), and the <strong>Revision Assessor</strong>
+          agent will judge whether the revision is substantive, cosmetic, or
+          a regression. Leave blank for a single-version review.
+        </p>
+        <input id="file_v1" type="file" name="file_v1" accept=".pdf,.txt"
+               onchange="document.querySelector('#name_v1').textContent=this.files[0]?.name||''"
+               class="mx-auto block text-sm">
+        <p id="name_v1" class="text-xs text-gray-600 mt-1"></p>
+      </details>
+
+
+      <details class="text-left bg-gray-50 border border-gray-200 rounded p-3 mb-4">
+        <summary class="cursor-pointer text-sm font-medium text-gray-800">
+          🔑 Bring your own API keys (optional)
+        </summary>
+        <p class="text-xs text-gray-600 mt-2 mb-3">
+          Keys are sent with this upload, held in RAM only for the duration of
+          this run, and <strong>never written to disk or logs</strong>. Leave
+          a field blank to use the key the server has configured. Use HTTPS in
+          any non-local deployment — these inputs are <code>type=password</code>
+          but the browser still transmits them over the connection.
+        </p>
+        <div class="space-y-2">
+          <input type="password" name="openai_api_key" autocomplete="off"
+                 placeholder="OPENAI_API_KEY (sk-...)"
+                 class="w-full text-sm px-2 py-1.5 border rounded font-mono">
+          <input type="password" name="anthropic_api_key" autocomplete="off"
+                 placeholder="ANTHROPIC_API_KEY (sk-ant-...)"
+                 class="w-full text-sm px-2 py-1.5 border rounded font-mono">
+          <input type="password" name="google_api_key" autocomplete="off"
+                 placeholder="GOOGLE_API_KEY (AIza...)"
+                 class="w-full text-sm px-2 py-1.5 border rounded font-mono">
+        </div>
+      </details>
+
+      <details class="text-left bg-gray-50 border border-gray-200 rounded p-3 mb-4" open>
+        <summary class="cursor-pointer text-sm font-medium text-gray-800">
+          ⚡ Quality vs cost preset (optional)
+        </summary>
+        <p class="text-xs text-gray-600 mt-2 mb-3">
+          Pick a tiered model bundle. Each preset routes the 12 agents across
+          high / standard / basic complexity tiers with different model
+          choices. Cost estimates below assume ~50k input + 5k output tokens
+          per agent call (a typical 20-30 page paper).
+        </p>
+        <div id="profile-radios" class="space-y-2">
+          <label class="block text-sm flex items-start gap-2">
+            <input type="radio" name="profile" value="" checked class="mt-1">
+            <span><strong>(server default)</strong>
+              — uses the routing in <code>config.yaml</code> as-is.</span>
+          </label>
+          <!-- max / std / quick populated below via JS -->
+        </div>
+      </details>
+
+      <details class="text-left bg-gray-50 border border-gray-200 rounded p-3 mb-4">
+        <summary class="cursor-pointer text-sm font-medium text-gray-800">
+          🤖 Pick a primary model for this run (optional)
+        </summary>
+        <p class="text-xs text-gray-600 mt-2 mb-3">
+          By default, the routing in <code>config.yaml</code> picks a different
+          model per agent based on complexity. Pin a single (provider, model)
+          here to force <strong>every agent</strong> to use it for this run
+          (tier_high keeps adaptive thinking on capable models).
+        </p>
+        <div class="grid grid-cols-2 gap-2">
+          <select id="provider-select" name="primary_provider"
+                  class="text-sm px-2 py-1.5 border rounded bg-white"
+                  onchange="onProviderChange()">
+            <option value="">(server default routing)</option>
+            <option value="openai">openai</option>
+            <option value="anthropic">anthropic</option>
+            <option value="google">google</option>
+          </select>
+          <select id="model-select" name="primary_model"
+                  class="text-sm px-2 py-1.5 border rounded bg-white font-mono"
+                  disabled
+                  onchange="onModelChange()">
+            <option value="">(catalog default)</option>
+          </select>
+        </div>
+        <p id="model-hint" class="text-xs text-gray-500 mt-2"></p>
+        <p id="model-cost-hint" class="text-xs text-gray-600 mt-1"></p>
+      </details>
+
+      <script>
+        let _modelCatalog = null;
+        async function loadCatalog() {
+          if (_modelCatalog) return _modelCatalog;
+          const r = await fetch('/api/models');
+          _modelCatalog = await r.json();
+          return _modelCatalog;
+        }
+
+        async function loadProfiles() {
+          const r = await fetch('/api/profiles');
+          const profiles = await r.json();
+          const container = document.getElementById('profile-radios');
+          for (const [name, info] of Object.entries(profiles)) {
+            const tiers = info.tiers;
+            const summary =
+              `${tiers.tier_high.provider}/${tiers.tier_high.model} → ` +
+              `${tiers.tier_standard.provider}/${tiers.tier_standard.model} → ` +
+              `${tiers.tier_basic.provider}/${tiers.tier_basic.model}`;
+            const label = document.createElement('label');
+            label.className = "block text-sm flex items-start gap-2";
+            const icon = {max: "🚀", std: "⚖️", quick: "💨"}[name] || "•";
+            label.innerHTML = `
+              <input type="radio" name="profile" value="${name}" class="mt-1">
+              <span>
+                ${icon} <strong>${name}</strong>
+                — est. <strong>$${info.estimated_cost_usd.toFixed(2)}</strong>
+                per 12-agent run
+                <span class="block text-xs text-gray-500 font-mono mt-0.5">${summary}</span>
+              </span>
+            `;
+            container.appendChild(label);
+          }
+        }
+        loadProfiles();
+
+        function _fmtPrice(v) {
+          if (v == null) return '—';
+          return '$' + Number(v).toFixed(2);
+        }
+        async function onProviderChange() {
+          const provSel = document.getElementById('provider-select');
+          const modelSel = document.getElementById('model-select');
+          const hint = document.getElementById('model-hint');
+          const costHint = document.getElementById('model-cost-hint');
+          const provider = provSel.value;
+          modelSel.innerHTML = '<option value="">(catalog default)</option>';
+          costHint.textContent = '';
+          if (!provider) {
+            modelSel.disabled = true;
+            hint.textContent = '';
+            return;
+          }
+          const catalog = await loadCatalog();
+          const models = catalog[provider] || [];
+          for (const m of models) {
+            const opt = document.createElement('option');
+            opt.value = m.model;
+            const note = m.notes ? ' — ' + m.notes : '';
+            const cost = (m.input_cost_per_million != null)
+              ? `  ·  ${_fmtPrice(m.input_cost_per_million)} in / ${_fmtPrice(m.output_cost_per_million)} out per 1M tok`
+              : '';
+            opt.textContent = m.model + cost + note;
+            modelSel.appendChild(opt);
+          }
+          modelSel.disabled = false;
+          hint.textContent = `${models.length} models available for ${provider}. Prices are vendor list prices per 1,000,000 tokens (May 2026).`;
+        }
+        function onModelChange() {
+          const modelSel = document.getElementById('model-select');
+          const provSel = document.getElementById('provider-select');
+          const costHint = document.getElementById('model-cost-hint');
+          const provider = provSel.value;
+          const model = modelSel.value;
+          if (!provider || !model || !_modelCatalog) {
+            costHint.textContent = '';
+            return;
+          }
+          const m = (_modelCatalog[provider] || []).find(x => x.model === model);
+          if (!m || m.input_cost_per_million == null) {
+            costHint.textContent = '';
+            return;
+          }
+          // 12 agent calls × ~50k input / ~5k output is a reasonable mid-paper estimate.
+          const per_call = (50000 * m.input_cost_per_million + 5000 * m.output_cost_per_million) / 1_000_000;
+          const per_run = per_call * 12;
+          costHint.textContent =
+            `Picked: ${model} · ` +
+            `${_fmtPrice(m.input_cost_per_million)} in / ${_fmtPrice(m.output_cost_per_million)} out per 1M tok. ` +
+            `Estimated $${per_call.toFixed(3)} per agent call · ~$${per_run.toFixed(2)} for a full 12-agent run on a typical paper.`;
+        }
+      </script>
+
+      <button type="submit"
+              class="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded font-medium">
+        Start review
+      </button>
+    </form>
+
+    <div id="status" class="mt-4"></div>
+
+    <div class="mt-10 text-sm text-gray-600 space-y-2">
+      <p>
+        Once you start, the orchestrator runs the 12 reviewer agents in parallel,
+        then coordinator → summary → editor. The next page shows live activity from
+        the audit log; the markdown report appears under <em>Show report</em> when
+        the run completes.
+      </p>
+      <p>
+        With no BYOK keys, the run uses whichever providers the server has
+        configured (see <code>config.yaml</code>). With BYOK, your keys override
+        the matching provider for this single run.
+      </p>
+    </div>
+  </div>
+</body>
+</html>

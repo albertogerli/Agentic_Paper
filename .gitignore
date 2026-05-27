@@ -1,0 +1,35 @@
+# Build artefacts
+dist/
+build/
+*.egg-info/
+*.pyc
+__pycache__/
+
+# Test + coverage
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.tox/
+
+# Runtime output dirs / logs
+output_paper_review/
+output/
+paper_review_system.log
+*.log
+
+# Per-machine local config (BYOK keys, custom routing)
+config.local.yaml
+config.gemini.yaml
+
+# Python venvs
+.venv/
+venv/
+env/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~

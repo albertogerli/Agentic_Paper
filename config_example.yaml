@@ -1,156 +1,148 @@
-# Configurazione esempio per sistema multi-agente ottimizzato
+# Example configuration for the multi-agent paper review system
 # File: config_example.yaml
+#
+# Three layers, from least to most specific:
+#   1. providers:  which API endpoints exist + how to authenticate.
+#   2. routing:    which (provider, model, thinking_budget) handles
+#                  each complexity tier (low / standard / high).
+#   3. agents:     per-agent overrides.
+#
+# ============================================
+# AVAILABLE MODELS (as of May 2026)
+# ============================================
+# Pick any of these for `model:` fields below. New releases work too —
+# the catalog (agentic_paper/models.py) infers reasoning style from the
+# model name prefix.
+#
+# OpenAI (Responses API for reasoning tier; reasoning.effort = low|medium|high|xhigh):
+#   gpt-5.5            — flagship (default for tier_high)
+#   gpt-5.5-pro        — higher-accuracy variant
+#   gpt-5.4-mini       — smaller/faster (default for tier_standard)
+#   gpt-5              — previous flagship
+#   gpt-5-mini
+#   o4-mini            — fast reasoning
+#   o3                 — earlier reasoning
+#   gpt-4o, gpt-4o-mini (non-reasoning)
+#
+# Anthropic (Messages API; thinking={type:adaptive} on 4.6+):
+#   claude-opus-4-7    — most capable
+#   claude-sonnet-4-6  — balanced (recommended)
+#   claude-haiku-4-5   — fast + cheap
+#
+# Google (Gemini 3.x uses thinking_level=low|medium|high; 2.x uses thinking_budget int):
+#   gemini-3-pro
+#   gemini-3.1-pro-preview
+#   gemini-3-flash
+#   gemini-3.1-flash-lite
+#   gemini-3.1-flash-lite
 
 # ============================================
-# MODELLI GPT-5
+# PROVIDERS
 # ============================================
-# gpt-5: Massima intelligenza, reasoning più alto ($1.25/$10)
-# gpt-5-mini: Bilanciato velocità/qualità ($0.25/$2)
-# gpt-5-nano: Velocissimo ed economico ($0.05/$0.40)
+# Set credentials per provider. Use `api_key_env` (recommended) or
+# `api_key` directly. For OpenAI-compatible local servers, set
+# `base_url` and the registry treats unknown names as openai_compat.
 
-model_powerful: "gpt-5"
-model_standard: "gpt-5-mini"
-model_basic: "gpt-5-nano"
-
-# ============================================
-# TEMPERATURE (0.0-1.0)
-# ============================================
-# Bassa (0.2-0.4): Task deterministici e analitici
-# Media (0.5-0.6): Task bilanciati
-# Alta (0.7-0.9): Task creativi e esplorativi
-
-# Task analitici - richiedono precisione
-temperature_methodology: 0.4      # Analisi metodologica rigorosa
-temperature_results: 0.4          # Analisi statistica precisa
-temperature_contradiction: 0.3    # Ricerca contraddizioni (massima precisione)
-temperature_hallucination: 0.3    # Rilevamento fabricazioni (massima precisione)
-
-# Task bilanciati
-temperature_structure: 0.5        # Valutazione struttura
-temperature_ethics: 0.5           # Valutazione etica
-temperature_coordinator: 0.6      # Sintesi review
-temperature_editor: 0.5           # Decisione editoriale
-
-# Task creativi - richiedono visione più ampia
-temperature_literature: 0.6       # Trovare connessioni con letteratura
-temperature_impact: 0.7           # Valutare impatto futuro
-temperature_ai_origin: 0.4        # Rilevamento AI
+providers:
+  openai:
+    api_key_env: OPENAI_API_KEY
+  anthropic:
+    api_key_env: ANTHROPIC_API_KEY
+  google:
+    api_key_env: GOOGLE_API_KEY
+  # Example local-model endpoint (uncomment to use):
+  # ollama:
+  #   base_url: "http://localhost:11434/v1"
+  #   api_key: "ollama"
 
 # ============================================
-# REASONING EFFORT
+# ROUTING
 # ============================================
-# low: Task semplici, risposta veloce
-# medium: Task standard (default)
-# high: Task complessi, analisi profonda
+# Tier-based defaults. Combined complexity score per agent:
+#   score = 0.4 * paper_complexity + 0.6 * agent_base_complexity
+# Picks tier_high (≥0.65), tier_standard (≥0.45), or tier_basic.
+#
+# `thinking_budget` may be an int (token budget; mapped per provider)
+# or "auto". Ignored on non-reasoning models.
 
-reasoning_effort: "medium"
+routing:
+  tier_high:
+    provider: anthropic
+    model: claude-opus-4-7
+    thinking_budget: auto       # → adaptive thinking on 4.6+ models
+  tier_standard:
+    provider: openai
+    model: gpt-5.4-mini
+    thinking_budget: medium      # → reasoning_effort = medium
+  tier_basic:
+    provider: google
+    model: gemini-3.1-flash-lite
 
 # ============================================
-# OUTPUT CONFIGURATION
+# PER-AGENT OVERRIDES (optional)
 # ============================================
-# GPT-5 supporta fino a 128K token in output
-# Valori consigliati:
-# - Paper brevi (<10 pagine): 8000
-# - Paper medi (10-30 pagine): 16000
-# - Paper lunghi (>30 pagine): 24000
+agents:
+  methodology:
+    provider: anthropic
+    model: claude-opus-4-7
+    thinking_budget: auto
+  contradiction:
+    provider: anthropic
+    model: claude-sonnet-4-6
+    thinking_budget: auto
+  results:
+    provider: openai
+    model: gpt-5.5
+    thinking_budget: high
+  structure:
+    provider: google
+    model: gemini-3.1-flash-lite
+  # ai_origin, hallucination, ethics, literature, impact:
+  # fall through to tier defaults above.
 
+# ============================================
+# TEMPERATURE (per-agent)
+# ============================================
+# NOTE: extended/adaptive thinking forces temperature=1.0 internally.
+# For non-reasoning models, drop these to 0.2-0.4 for analytic tasks.
+
+temperature_methodology: 1.0
+temperature_results: 1.0
+temperature_literature: 1.0
+temperature_structure: 1.0
+temperature_impact: 1.0
+temperature_contradiction: 1.0
+temperature_ethics: 1.0
+temperature_coordinator: 1.0
+temperature_editor: 1.0
+temperature_ai_origin: 1.0
+temperature_hallucination: 1.0
+
+# ============================================
+# OUTPUT
+# ============================================
 max_output_tokens: 16000
+output_dir: "output_paper_review"
 
 # ============================================
-# DIRECTORY OUTPUT
+# PARALLELISM
 # ============================================
-output_dir: "output_revisione_paper"
-
-# ============================================
-# PARALLELISMO
-# ============================================
-# Dipende dal tuo tier OpenAI:
-# Tier 1: 500 RPM → usa 3-4
-# Tier 2: 5000 RPM → usa 6-8
-# Tier 3+: 5000+ RPM → usa 8-10
-
+# Match to the strictest rate-limit tier across your registered providers.
 max_parallel_agents: 6
-
-# ============================================
-# TIMEOUT
-# ============================================
-# Tempo massimo (secondi) per completare un agente
-# Con reasoning "high" potrebbe servire più tempo
-
 agent_timeout: 600
 
 # ============================================
 # PROMPT CACHING
 # ============================================
-# Abilita caching dei prompt per risparmiare fino all'87.5%
-# Il paper viene cachato e riusato da tutti gli agenti
-# Risparmio: ~$0.45 per review su paper medio
-
+# Anthropic: explicit `cache_control` blocks on system + user (handled per call).
+# OpenAI:    automatic server-side (Responses API has best cache hit-rate).
+# Google:    no explicit per-request caching today.
 use_prompt_caching: true
 
 # ============================================
-# CONFIGURAZIONI PRESET
+# LEGACY FIELDS (used only when `routing` is absent)
 # ============================================
-
-# PRESET 1: MASSIMA QUALITÀ (costoso, lento, accurato)
-# Uncomment e modifica le configurazioni sopra:
-# model_powerful: "gpt-5"
-# model_standard: "gpt-5"
-# model_basic: "gpt-5-mini"
-# reasoning_effort: "high"
-# max_output_tokens: 24000
-# max_parallel_agents: 4
-# temperature_methodology: 0.3
-# temperature_contradiction: 0.2
-
-# PRESET 2: BILANCIATO (default - raccomandato)
-# Già configurato sopra
-
-# PRESET 3: VELOCE ED ECONOMICO (veloce, economico, qualità buona)
-# model_powerful: "gpt-5-mini"
-# model_standard: "gpt-5-mini"
-# model_basic: "gpt-5-nano"
-# reasoning_effort: "low"
-# max_output_tokens: 8000
-# max_parallel_agents: 8
-# use_prompt_caching: true
-
-# PRESET 4: ULTRA-ECONOMICO (massimo risparmio)
-# model_powerful: "gpt-5-mini"
-# model_standard: "gpt-5-nano"
-# model_basic: "gpt-5-nano"
-# reasoning_effort: "low"
-# max_output_tokens: 4000
-# max_parallel_agents: 10
-# use_prompt_caching: true
-
-# ============================================
-# NOTE
-# ============================================
-# 
-# 1. API KEY: Imposta sempre OPENAI_API_KEY come variabile d'ambiente
-#    export OPENAI_API_KEY="sk-..."
-#
-# 2. RATE LIMITS: Controlla il tuo tier su platform.openai.com
-#    e adatta max_parallel_agents di conseguenza
-#
-# 3. COSTI STIMATI per paper 50K caratteri:
-#    - Preset 1 (Qualità): ~$2.50
-#    - Preset 2 (Bilanciato): ~$1.30
-#    - Preset 3 (Veloce): ~$0.60
-#    - Preset 4 (Economico): ~$0.30
-#
-# 4. TEMPERATURE: Non usare mai 0.0 o 1.0 agli estremi
-#    GPT-5 performa meglio con valori intermedi
-#
-# 5. REASONING: "high" può aumentare i costi del 30-50%
-#    ma migliora significativamente la qualità
-#
-# 6. CACHING: Funziona meglio quando processi più paper
-#    consecutivamente o fai revisioni iterative
-#
-# ============================================
-
-
-
-
+model_powerful: "gpt-5.4-mini"
+model_standard: "gpt-5.4-mini"
+model_basic: "gpt-5.4-mini"
+reasoning_effort: "medium"   # CLI back-compat, not consumed

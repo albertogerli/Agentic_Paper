@@ -1,0 +1,7 @@
+# Dev / test dependencies (kept separate so production installs stay lean)
+-r requirements.txt
+
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-cov>=5.0.0
+reportlab>=4.0.0   # only used by tests/_make_pdf.py to regenerate the fixture
