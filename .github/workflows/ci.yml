@@ -17,9 +17,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install uv
+        # The action's default cache key globs **/uv.lock, which doesn't
+        # exist here (we lock via requirements-lock.txt, pip-compile style).
+        # Point it at the files we DO have so the cache key is meaningful.
         uses: astral-sh/setup-uv@v3
         with:
           enable-cache: true
+          cache-dependency-glob: |
+            requirements-lock.txt
+            requirements-dev.txt
+            pyproject.toml
 
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
