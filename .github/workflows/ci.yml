@@ -20,7 +20,7 @@ jobs:
         # The action's default cache key globs **/uv.lock, which doesn't
         # exist here (we lock via requirements-lock.txt, pip-compile style).
         # Point it at the files we DO have so the cache key is meaningful.
-        uses: astral-sh/setup-uv@v8
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           cache-dependency-glob: |
