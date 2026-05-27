@@ -14,13 +14,13 @@ jobs:
         python-version: ["3.10", "3.11", "3.12"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install uv
         # The action's default cache key globs **/uv.lock, which doesn't
         # exist here (we lock via requirements-lock.txt, pip-compile style).
         # Point it at the files we DO have so the cache key is meaningful.
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v8
         with:
           enable-cache: true
           cache-dependency-glob: |
@@ -46,7 +46,7 @@ jobs:
 
       - name: Upload coverage XML
         if: matrix.python-version == '3.12'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-xml
           path: coverage.xml
